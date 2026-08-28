@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; script-src 'self'"
+    />
+    <title>Cursor HUD</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="shell" class="shell">
+      <div class="tabs" id="tab-bar" data-hud-solid>
+        <div class="tab-list" id="tab-list"></div>
+        <button type="button" class="tab-new" id="new-tab" title="New agent tab">+</button>
+      </div>
+
+      <div class="thread" id="thread" data-hud-solid>
+        <div class="thread-fade"></div>
+        <div id="messages" class="messages"></div>
+        <div id="tools" class="tools" hidden></div>
+      </div>
+
+      <form id="composer" class="composer" data-hud-solid>
+        <div class="composer-meta">
+          <span class="brand">Cursor</span>
+          <span id="auth-label" class="muted">not signed in</span>
+          <button type="button" class="text-btn" id="toggle-compact" title="Toggle transcript">
+            hide
+          </button>
+          <button type="button" class="text-btn" id="open-settings" title="Settings">setup</button>
+        </div>
+        <div class="composer-row">
+          <textarea
+            id="prompt"
+            rows="1"
+            placeholder="Ask Cursor…  Ctrl+Enter to send"
+            aria-label="Cursor prompt"
+            autocomplete="off"
+            autocapitalize="sentences"
+            spellcheck="true"
+            inputmode="text"
+          ></textarea>
+          <button type="submit" id="send" class="send" title="Send">↑</button>
+        </div>
+        <label class="screen-toggle">
+          <input type="checkbox" id="attach-screen" />
+          include screen
+        </label>
+      </form>
+
+      <section id="settings" class="settings" hidden data-hud-solid>
+        <h1>Cursor HUD</h1>
+        <p class="lede">
+          Overlay chat for WoW Classic, Retail, and any borderless fullscreen game. This is not a
+          Lua addon — Blizzard blocks addons from talking to other apps.
+        </p>
+        <p class="hint">
+          In WoW, set the display mode to <strong>Windowed (Fullscreen)</strong> / borderless.
+          Exclusive fullscreen will hide this overlay.
+        </p>
+        <label>
+          This tab
+          <input id="workspace" type="text" readonly placeholder="No folder selected" />
+        </label>
+        <label>
+          Model
+          <input id="model" type="text" value="composer-2.5" />
+        </label>
+        <div class="row">
+          <button type="button" id="login">Sign in to Cursor</button>
+          <button type="button" id="logout" class="ghost">Sign out</button>
+        </div>
+        <p id="login-url" class="hint" hidden></p>
+        <p class="hotkey">Toggle overlay: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></p>
+        <button type="button" id="close-settings" class="ghost">Done</button>
+      </section>
+
+      <section id="tab-picker" class="settings picker" hidden data-hud-solid>
+        <h1>New agent</h1>
+        <p class="lede">Same repo or a different one. Each tab keeps its own Cursor conversation.</p>
+        <button type="button" id="same-repo" class="choice" hidden></button>
+        <h2>Recently opened</h2>
+        <div id="recent-list" class="recent-list"></div>
+        <p id="recent-empty" class="hint">No recent repos yet.</p>
+        <div class="row">
+          <button type="button" id="browse-repo">Browse…</button>
+          <button type="button" id="close-picker" class="ghost">Cancel</button>
+        </div>
+      </section>
+    </div>
+    <script src="./tabs.js"></script>
+    <script src="./core.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

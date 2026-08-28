@@ -1,0 +1,28 @@
+{
+  "name": "cursor-hud",
+  "version": "0.1.0",
+  "description": "Always-on-top Cursor chat HUD for WoW Classic, Retail, and other borderless games.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:linux": "electron . --no-sandbox --disable-gpu",
+    "test": "node --test test/*.test.js",
+    "host": "node host/agent-host.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  },
+  "keywords": [
+    "cursor",
+    "wow",
+    "overlay",
+    "hud"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@cursor/sdk": "^1.0.30"
+  },
+  "devDependencies": {
+    "electron": "^37.2.6"
+  }
+}
