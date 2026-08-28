@@ -12,9 +12,9 @@ describe("recent repos", () => {
   });
 
   it("treats trailing slashes and backslashes as the same repo", () => {
-    const recent = rememberRepo(["C:\\work\\wow"], "C:/work/wow/");
+    const recent = rememberRepo(["C:\\work\\app"], "C:/work/app/");
     assert.equal(recent.length, 1);
-    assert.equal(recent[0], "C:/work/wow");
+    assert.equal(recent[0], "C:/work/app");
   });
 
   it("caps the list", () => {
@@ -27,10 +27,10 @@ describe("recent repos", () => {
 
 describe("tabs", () => {
   it("names a second agent on the same repo distinctly", () => {
-    const first = createTab("/Users/me/game", []);
-    const second = createTab("/Users/me/game", [first]);
-    assert.equal(first.title, "game");
-    assert.equal(second.title, "game 2");
+    const first = createTab("/Users/me/app", []);
+    const second = createTab("/Users/me/app", [first]);
+    assert.equal(first.title, "app");
+    assert.equal(second.title, "app 2");
     assert.notEqual(first.id, second.id);
     assert.equal(nextTabTitle("/Users/me/other", [first, second]), "other");
   });

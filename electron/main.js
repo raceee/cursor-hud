@@ -8,6 +8,7 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { createNdjsonParser, encodeLine } = require("../lib/protocol");
 const { normalizeConfig, normalizeBounds } = require("../lib/config");
+const { resolveHostLaunch } = require("../lib/host-process");
 
 let hudWindow = null;
 let host = null;
@@ -42,10 +43,15 @@ function saveConfig(next) {
   return config;
 }
 
-function findNodeBinary() {
-  if (process.env.CURSOR_HUD_NODE) return process.env.CURSOR_HUD_NODE;
-  if (process.execPath && !/electron/i.test(process.execPath)) return process.execPath;
-  return "node";
+function hostLaunch() {
+  return resolveHostLaunch({
+    packaged: app.isPackaged,
+    execPath: process.execPath,
+    resourcesPath: process.resourcesPath,
+    appRoot: path.join(__dirname, ".."),
+    env: process.env,
+    versions: process.versions,
+  });
 }
 
 function sendToHost(payload) {
@@ -125,13 +131,11 @@ function startHost() {
   hostReady = new Promise((resolve) => {
     resolveHostReady = resolve;
   });
-  const hostPath = path.join(__dirname, "..", "host", "agent-host.js");
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  delete env.NO_OPEN_BROWSER;
-  const child = spawn(findNodeBinary(), [hostPath], {
+  const launch = hostLaunch();
+  const child = spawn(launch.command, [launch.script], {
     stdio: ["pipe", "pipe", "pipe"],
-    env,
+    env: launch.env,
+    cwd: app.isPackaged ? app.getPath("userData") : path.join(__dirname, ".."),
   });
   const parse = createNdjsonParser((msg) => {
     if (msg && msg.event === "ready") resolveHostReady();
@@ -204,8 +208,7 @@ function createHudWindow() {
     },
   });
 
-  // Never call setBackgroundMaterial on Windows: it kills per-pixel alpha
-  // (Hermes HUD hit this on Win11 / Electron 40).
+  // Never call setBackgroundMaterial on Windows: it kills per-pixel alpha.
   hudWindow.setAlwaysOnTop(true, "screen-saver");
   hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   hudWindow.setSkipTaskbar(false);

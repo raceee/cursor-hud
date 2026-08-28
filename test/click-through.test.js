@@ -13,7 +13,7 @@ function el(selectorMatch) {
 }
 
 describe("click-through", () => {
-  it("ignores mouse over empty HUD chrome so the game keeps the click", () => {
+  it("ignores mouse over empty HUD chrome so the application underneath keeps the click", () => {
     assert.equal(
       hudIgnoresMouse({
         hit: null,
