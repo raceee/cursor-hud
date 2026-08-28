@@ -4,8 +4,8 @@
   "description": "Always-on-top Cursor chat HUD for WoW Classic, Retail, and other borderless games.",
   "main": "electron/main.js",
   "scripts": {
-    "start": "electron .",
-    "start:linux": "electron . --no-sandbox --disable-gpu",
+    "start": "node scripts/start.js",
+    "start:linux": "node scripts/start.js --no-sandbox --disable-gpu",
     "test": "node --test test/*.test.js",
     "host": "node host/agent-host.js"
   },
@@ -23,6 +23,9 @@
     "@cursor/sdk": "^1.0.30"
   },
   "devDependencies": {
-    "electron": "^37.2.6"
+    "electron": "^37.10.3"
+  },
+  "allowScripts": {
+    "electron@37.10.3": true
   }
 }

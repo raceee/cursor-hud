@@ -49,4 +49,30 @@ describe("transcript", () => {
     assert.equal(state.error, "not signed in");
     assert.equal(state.messages[1].pending, false);
   });
+
+  it("keeps streamed tokens in one paragraph instead of one message per token", () => {
+    let state = createTranscript();
+    state = applyHudEvent(state, { kind: "user", text: "hi" });
+    state = applyHudEvent(state, { kind: "assistant-start" });
+    state = applyHudEvent(state, { kind: "assistant", text: "The" });
+    state = applyHudEvent(state, { kind: "assistant", text: " HUD" });
+    state = applyHudEvent(state, { kind: "assistant", text: " stays" });
+    state = applyHudEvent(state, { kind: "done", result: "The HUD stays put.", status: "finished" });
+    assert.equal(state.messages.filter((msg) => msg.role === "assistant").length, 1);
+    assert.equal(state.messages[1].text, "The HUD stays put.");
+  });
+
+  it("prefers a cumulative snapshot over appending it again", () => {
+    const { mergeAssistantText } = require("../lib/transcript");
+    assert.equal(mergeAssistantText("The HUD", "The HUD stays put."), "The HUD stays put.");
+    assert.equal(mergeAssistantText("The HUD stays put.", "The HUD"), "The HUD stays put.");
+    assert.equal(mergeAssistantText("The HUD ", "stays put."), "The HUD stays put.");
+  });
+
+  it("joins token-per-line dumps into a paragraph", () => {
+    const { formatAssistantText } = require("../lib/transcript");
+    const dumped = ["The", "HUD", "stays", "put", "over", "the", "game."].join("\n");
+    assert.equal(formatAssistantText(dumped), "The HUD stays put over the game.");
+    assert.equal(formatAssistantText("Line one.\n\nLine two."), "Line one.\n\nLine two.");
+  });
 });

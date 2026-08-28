@@ -2,6 +2,8 @@
 
 const core = window.HudCore;
 const tabLib = window.HudTabs;
+const modelsLib = window.HudModels;
+const markdown = window.HudMarkdown;
 const hud = window.cursorHud;
 
 const els = {
@@ -12,10 +14,16 @@ const els = {
   send: document.getElementById("send"),
   form: document.getElementById("composer"),
   auth: document.getElementById("auth-label"),
+  authBanner: document.getElementById("auth-banner"),
+  authBannerText: document.getElementById("auth-banner-text"),
+  openLoginUrl: document.getElementById("open-login-url"),
   settings: document.getElementById("settings"),
   picker: document.getElementById("tab-picker"),
   workspace: document.getElementById("workspace"),
-  model: document.getElementById("model"),
+  modelChip: document.getElementById("model-chip"),
+  modelLabel: document.getElementById("model-label"),
+  modelMenu: document.getElementById("model-menu"),
+  modelList: document.getElementById("model-list"),
   attachScreen: document.getElementById("attach-screen"),
   loginUrl: document.getElementById("login-url"),
   tabList: document.getElementById("tab-list"),
@@ -27,12 +35,18 @@ const els = {
 let config = {
   workspace: "",
   model: "composer-2.5",
+  modelParams: [],
   attachScreen: false,
   compact: false,
 };
 let tabs = [];
 let activeTabId = "";
 let recentWorkspaces = [];
+let modelOptions = [];
+let loginUrl = "";
+let authState = { status: "logged-out" };
+let ghosted = false;
+let dragging = false;
 
 function activeTab() {
   return tabs.find((tab) => tab.id === activeTabId) || null;
@@ -47,6 +61,54 @@ function persist() {
     recentWorkspaces,
     workspace: current ? current.workspace : "",
   });
+}
+
+function selectedModel() {
+  return (
+    modelsLib.findModelOption(modelOptions, config.model, config.modelParams) || {
+      id: config.model,
+      params: config.modelParams || [],
+      label: config.model,
+    }
+  );
+}
+
+function renderModelMenu() {
+  els.modelList.innerHTML = "";
+  if (!modelOptions.length) {
+    const empty = document.createElement("div");
+    empty.className = "menu-title";
+    empty.textContent = authState.status === "logged-in" ? "No models returned." : "Sign in to load models.";
+    els.modelList.appendChild(empty);
+    return;
+  }
+  const current = modelsLib.optionKey(selectedModel());
+  for (const option of modelOptions) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `menu-item${modelsLib.optionKey(option) === current ? " selected" : ""}`;
+    const name = document.createElement("span");
+    name.textContent = option.label;
+    btn.appendChild(name);
+    if (option.description) {
+      const desc = document.createElement("span");
+      desc.className = "desc";
+      desc.textContent = option.description;
+      btn.appendChild(desc);
+    }
+    btn.addEventListener("click", () => {
+      config.model = option.id;
+      config.modelParams = option.params || [];
+      els.modelMenu.hidden = true;
+      persist();
+      renderModelChip();
+    });
+    els.modelList.appendChild(btn);
+  }
+}
+
+function renderModelChip() {
+  els.modelLabel.textContent = selectedModel().label || config.model || "Model";
 }
 
 function renderTabs() {
@@ -80,19 +142,24 @@ function renderThread() {
   if (!tab) {
     const empty = document.createElement("div");
     empty.className = "msg assistant";
-    empty.textContent = "Open a tab to start an agent. + picks a recent repo or the same one again.";
+    empty.textContent = "Open a tab to start an agent.";
     els.messages.appendChild(empty);
   } else if (!state.messages.length) {
     const empty = document.createElement("div");
     empty.className = "msg assistant";
-    empty.textContent = `Agent on ${tab.title}. Same repo or another — each tab is its own conversation.`;
+    empty.textContent = `Agent on ${tab.title}. Ask Cursor about this repo.`;
     els.messages.appendChild(empty);
   }
   if (tab) {
     for (const msg of state.messages) {
       const node = document.createElement("div");
       node.className = `msg ${msg.role}${msg.pending ? " pending" : ""}`;
-      node.textContent = msg.text || (msg.pending ? "thinking" : "");
+      const raw = msg.role === "assistant" ? core.formatAssistantText(msg.text) : msg.text || "";
+      if (msg.role === "assistant" || (raw && raw.includes("```"))) {
+        markdown.renderMarkdown(node, raw || (msg.pending ? "" : ""));
+      } else {
+        node.textContent = raw || (msg.pending ? "" : "");
+      }
       els.messages.appendChild(node);
     }
     if (state.error) {
@@ -113,20 +180,64 @@ function renderThread() {
 function render() {
   renderTabs();
   renderThread();
+  renderModelChip();
 }
 
 function setAuth(auth) {
   if (!auth) return;
-  els.auth.textContent =
-    auth.status === "logged-in" ? auth.email || "signed in" : "not signed in";
+  authState = auth;
+  const signedIn = auth.status === "logged-in";
+  const email = auth.email || "your Cursor account";
+  els.auth.textContent = signedIn ? email : "not signed in";
+  document.getElementById("banner-login").hidden = signedIn || Boolean(loginUrl);
+  document.getElementById("setup-auth-dot").dataset.state = signedIn ? "in" : "out";
+  document.getElementById("setup-auth-state").textContent = signedIn ? "Signed in" : "Signed out";
+  document.getElementById("setup-auth-detail").textContent = signedIn
+    ? email
+    : "Sign in to use Cursor agents from this overlay.";
+  document.getElementById("login").disabled = signedIn;
+  document.getElementById("logout").disabled = !signedIn;
+  if (signedIn) {
+    els.authBanner.hidden = true;
+    els.openLoginUrl.hidden = true;
+    loginUrl = "";
+  } else if (!loginUrl) {
+    els.authBanner.hidden = false;
+    els.authBannerText.textContent = "Sign in to Cursor to use the HUD.";
+    els.openLoginUrl.hidden = true;
+  }
+}
+
+function setLoginPending(url) {
+  loginUrl = url || loginUrl;
+  els.authBanner.hidden = false;
+  els.authBannerText.textContent = "Finish signing in in your browser…";
+  document.getElementById("banner-login").hidden = true;
+  els.openLoginUrl.hidden = !loginUrl;
+  if (loginUrl) {
+    els.loginUrl.hidden = false;
+    els.loginUrl.textContent = loginUrl;
+  }
 }
 
 function applyConfig(next) {
   config = { ...config, ...next };
-  els.model.value = config.model || "composer-2.5";
+  if (!Array.isArray(config.modelParams)) config.modelParams = [];
   els.attachScreen.checked = Boolean(config.attachScreen);
   els.shell.classList.toggle("is-compact", Boolean(config.compact));
-  document.getElementById("toggle-compact").textContent = config.compact ? "show" : "hide";
+  document.getElementById("toggle-compact").textContent = config.compact ? "Show" : "Hide";
+  renderModelChip();
+}
+
+function applyModels(options) {
+  modelOptions = Array.isArray(options) ? options : [];
+  const match = selectedModel();
+  if (match && match.id) {
+    config.model = match.id;
+    config.modelParams = match.params || [];
+  }
+  renderModelChip();
+  if (!els.modelMenu.hidden) renderModelMenu();
 }
 
 function selectTab(tabId) {
@@ -152,7 +263,7 @@ function openTab(workspace) {
 async function closeTab(tabId) {
   const index = tabs.findIndex((tab) => tab.id === tabId);
   if (index === -1) return;
-  const [removed] = tabs.splice(index, 1);
+  tabs.splice(index, 1);
   try {
     await hud.closeTab(tabId);
   } catch {
@@ -162,13 +273,47 @@ async function closeTab(tabId) {
     const neighbor = tabs[index] || tabs[index - 1] || tabs[0] || null;
     activeTabId = neighbor ? neighbor.id : "";
   }
-  void removed;
   persist();
   render();
 }
 
 function overlayOpen() {
-  return !els.settings.hidden || !els.picker.hidden;
+  return !els.settings.hidden || !els.picker.hidden || !els.modelMenu.hidden;
+}
+
+function bindWindowChrome(handle, kind) {
+  handle.addEventListener("pointerdown", (event) => {
+    if (event.button !== 0 || ghosted) return;
+    dragging = true;
+    handle.setPointerCapture(event.pointerId);
+    hud.setIgnoreMouse(false);
+    hud.windowDragStart(kind);
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!dragging || !handle.hasPointerCapture(event.pointerId)) return;
+    hud.windowDragMove();
+  });
+  const endDrag = () => {
+    if (!dragging) return;
+    dragging = false;
+    hud.windowDragEnd();
+  };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+}
+
+function syncClickThrough(clientX, clientY) {
+  if (ghosted || dragging) return;
+  const hit = document.elementFromPoint(clientX, clientY);
+  const ignore = core.hudIgnoresMouse({
+    hit,
+    activeElement: document.activeElement,
+    hasFocus: document.hasFocus(),
+    forceSolid: overlayOpen() || document.activeElement === els.prompt,
+    ghost: ghosted,
+  });
+  hud.setIgnoreMouse(ignore);
 }
 
 function fillPicker() {
@@ -211,15 +356,28 @@ function openPicker() {
   hud.setIgnoreMouse(false);
 }
 
-function syncClickThrough(clientX, clientY) {
-  const hit = document.elementFromPoint(clientX, clientY);
-  const ignore = core.hudIgnoresMouse({
-    hit,
-    activeElement: document.activeElement,
-    hasFocus: document.hasFocus(),
-    forceSolid: overlayOpen() || document.activeElement === els.prompt,
-  });
-  hud.setIgnoreMouse(ignore);
+async function startLogin() {
+  setLoginPending(loginUrl);
+  try {
+    const result = await hud.login();
+    if (result && (result.status === "logged-in" || result.email)) {
+      setAuth({
+        status: "logged-in",
+        email: result.email || "signed in",
+        apiKeyExpiresAtMs: result.apiKeyExpiresAtMs,
+      });
+      try {
+        applyModels(await hud.listModels());
+      } catch {
+        /* models load after auth event */
+      }
+    }
+  } catch (err) {
+    els.authBanner.hidden = false;
+    els.authBannerText.textContent = err.message || String(err);
+    els.loginUrl.hidden = false;
+    els.loginUrl.textContent = err.message || String(err);
+  }
 }
 
 els.form.addEventListener("submit", async (event) => {
@@ -256,18 +414,19 @@ els.prompt.addEventListener("focus", () => {
 
 els.prompt.addEventListener("input", () => {
   els.prompt.style.height = "auto";
-  els.prompt.style.height = Math.min(els.prompt.scrollHeight, 120) + "px";
+  els.prompt.style.height = Math.min(els.prompt.scrollHeight, 140) + "px";
 });
 
 els.prompt.addEventListener("keydown", (event) => {
   if (event.isComposing) return;
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+  if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     els.form.requestSubmit();
   }
   if (event.key === "Escape") {
     els.picker.hidden = true;
     els.settings.hidden = true;
+    els.modelMenu.hidden = true;
     els.prompt.blur();
     hud.setIgnoreMouse(true);
   }
@@ -297,18 +456,23 @@ document.getElementById("browse-repo").addEventListener("click", async () => {
   const folder = await hud.pickWorkspace();
   if (folder) openTab(folder);
 });
-document.getElementById("login").addEventListener("click", async () => {
-  try {
-    await hud.login();
-  } catch (err) {
-    els.loginUrl.hidden = false;
-    els.loginUrl.textContent = err.message || String(err);
-  }
+document.getElementById("login").addEventListener("click", startLogin);
+document.getElementById("banner-login").addEventListener("click", startLogin);
+els.openLoginUrl.addEventListener("click", () => {
+  if (loginUrl) hud.openUrl(loginUrl);
 });
-document.getElementById("logout").addEventListener("click", () => hud.logout());
-els.model.addEventListener("change", () => {
-  config.model = els.model.value;
-  persist();
+document.getElementById("logout").addEventListener("click", async () => {
+  await hud.logout();
+  applyModels([]);
+  setAuth({ status: "logged-out" });
+});
+els.modelChip.addEventListener("click", () => {
+  const open = els.modelMenu.hidden;
+  els.modelMenu.hidden = !open;
+  if (open) {
+    renderModelMenu();
+    hud.setIgnoreMouse(false);
+  }
 });
 els.attachScreen.addEventListener("change", () => {
   config.attachScreen = els.attachScreen.checked;
@@ -319,20 +483,42 @@ window.addEventListener("mousemove", (event) => {
   syncClickThrough(event.clientX, event.clientY);
 });
 window.addEventListener("blur", () => {
+  if (ghosted || dragging) return;
   if (document.activeElement === els.prompt) return;
   hud.setIgnoreMouse(true);
 });
-window.addEventListener("focus", () => hud.setIgnoreMouse(false));
+window.addEventListener("focus", () => {
+  if (ghosted) return;
+  hud.setIgnoreMouse(false);
+});
 
 hud.onHudEvent((msg) => {
   if (!msg) return;
+  if (msg.event === "ghost") {
+    ghosted = Boolean(msg.ghost);
+    document.documentElement.classList.toggle("is-ghost", ghosted);
+    return;
+  }
   if (msg.event === "focus-composer") {
     els.prompt.focus();
     return;
   }
+  if (msg.event === "login-pending") {
+    setLoginPending();
+    return;
+  }
   if (msg.event === "login-url") {
-    els.loginUrl.hidden = false;
-    els.loginUrl.textContent = `Open ${msg.url} to finish signing in.`;
+    setLoginPending(msg.url);
+    return;
+  }
+  if (msg.event === "auth") {
+    setAuth(msg);
+    return;
+  }
+  if (msg.event === "models") {
+    applyModels(msg.options || msg);
+    persist();
+    return;
   }
   if (msg.event === "hud") {
     const tab = tabs.find((item) => item.id === msg.tabId) || activeTab();
@@ -353,6 +539,10 @@ hud.ready().then((info) => {
   }));
   activeTabId = loaded.activeTabId || (tabs[0] && tabs[0].id) || "";
   setAuth(info.auth);
+  applyModels(info.models);
   render();
   if (!tabs.length) openPicker();
 });
+
+bindWindowChrome(document.getElementById("drag-handle"), "move");
+bindWindowChrome(document.getElementById("resize-handle"), "resize");

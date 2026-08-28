@@ -12,86 +12,115 @@
   <body>
     <div id="shell" class="shell">
       <div class="tabs" id="tab-bar" data-hud-solid>
+        <button type="button" class="drag-handle" id="drag-handle" title="Drag HUD" data-hud-drag>
+          <span></span><span></span><span></span>
+        </button>
         <div class="tab-list" id="tab-list"></div>
-        <button type="button" class="tab-new" id="new-tab" title="New agent tab">+</button>
+        <button type="button" class="icon-btn tab-new" id="new-tab" title="New agent">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
+        </button>
       </div>
 
       <div class="thread" id="thread" data-hud-solid>
-        <div class="thread-fade"></div>
         <div id="messages" class="messages"></div>
         <div id="tools" class="tools" hidden></div>
       </div>
 
       <form id="composer" class="composer" data-hud-solid>
-        <div class="composer-meta">
-          <span class="brand">Cursor</span>
-          <span id="auth-label" class="muted">not signed in</span>
-          <button type="button" class="text-btn" id="toggle-compact" title="Toggle transcript">
-            hide
+        <div id="auth-banner" class="auth-banner" hidden>
+          <span id="auth-banner-text">Sign in to Cursor to use the HUD.</span>
+          <button type="button" class="text-btn" id="banner-login">Sign in</button>
+          <button type="button" class="text-btn" id="open-login-url" hidden>Open login</button>
+        </div>
+        <textarea
+          id="prompt"
+          rows="1"
+          placeholder="Plan, @ for context, / for commands"
+          aria-label="Cursor prompt"
+          autocomplete="off"
+          autocapitalize="sentences"
+          spellcheck="true"
+          inputmode="text"
+        ></textarea>
+        <div class="composer-bar">
+          <button type="button" class="chip" id="mode-chip" title="Agent mode" disabled>
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M8 1.6 9.7 6h4.6L10.8 8.8 12.4 13 8 10.4 3.6 13l1.6-4.2L1.7 6h4.6L8 1.6Z" />
+            </svg>
+            Agent
           </button>
-          <button type="button" class="text-btn" id="open-settings" title="Settings">setup</button>
+          <button type="button" class="chip" id="model-chip" title="Model">
+            <span id="model-label">Composer 2.5</span>
+            <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 8l3-3.5" /></svg>
+          </button>
+          <span id="auth-label" class="auth-label">not signed in</span>
+          <button type="button" class="text-btn" id="toggle-compact" title="Toggle transcript">Hide</button>
+          <button type="button" class="text-btn" id="open-settings" title="Settings">Setup</button>
+          <span class="bar-spacer"></span>
+          <label class="icon-btn attach" title="Include screen">
+            <input type="checkbox" id="attach-screen" />
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="11" height="9" rx="1.4" />
+              <path d="m3.2 11 3-3.2 2.1 2.1 2-2.3 2.5 3.4" />
+            </svg>
+          </label>
+          <button type="submit" id="send" class="send" title="Send">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.6M4.2 7.2 8 3.5l3.8 3.7" /></svg>
+          </button>
         </div>
-        <div class="composer-row">
-          <textarea
-            id="prompt"
-            rows="1"
-            placeholder="Ask Cursor…  Ctrl+Enter to send"
-            aria-label="Cursor prompt"
-            autocomplete="off"
-            autocapitalize="sentences"
-            spellcheck="true"
-            inputmode="text"
-          ></textarea>
-          <button type="submit" id="send" class="send" title="Send">↑</button>
-        </div>
-        <label class="screen-toggle">
-          <input type="checkbox" id="attach-screen" />
-          include screen
-        </label>
       </form>
 
-      <section id="settings" class="settings" hidden data-hud-solid>
+      <div id="model-menu" class="menu" hidden data-hud-solid>
+        <div class="menu-title">Models</div>
+        <div id="model-list" class="menu-list"></div>
+      </div>
+
+      <section id="settings" class="panel" hidden data-hud-solid>
         <h1>Cursor HUD</h1>
+        <div class="auth-card" id="setup-auth">
+          <span class="auth-dot" id="setup-auth-dot" data-state="out"></span>
+          <div>
+            <div id="setup-auth-state">Signed out</div>
+            <div id="setup-auth-detail" class="hint">Sign in to use Cursor agents from this overlay.</div>
+          </div>
+        </div>
         <p class="lede">
-          Overlay chat for WoW Classic, Retail, and any borderless fullscreen game. This is not a
-          Lua addon — Blizzard blocks addons from talking to other apps.
-        </p>
-        <p class="hint">
-          In WoW, set the display mode to <strong>Windowed (Fullscreen)</strong> / borderless.
-          Exclusive fullscreen will hide this overlay.
+          Always-on-top Cursor chat. Overlay a game in borderless fullscreen — this is not a WoW
+          addon.
         </p>
         <label>
           This tab
           <input id="workspace" type="text" readonly placeholder="No folder selected" />
         </label>
-        <label>
-          Model
-          <input id="model" type="text" value="composer-2.5" />
-        </label>
         <div class="row">
-          <button type="button" id="login">Sign in to Cursor</button>
-          <button type="button" id="logout" class="ghost">Sign out</button>
+          <button type="button" class="primary" id="login">Sign in to Cursor</button>
+          <button type="button" class="ghost" id="logout">Sign out</button>
         </div>
         <p id="login-url" class="hint" hidden></p>
-        <p class="hotkey">Toggle overlay: <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>H</kbd></p>
+        <p class="hotkey">
+          Ghost overlay (stays put, click-through): <kbd>⌘</kbd><kbd>Shift</kbd><kbd>H</kbd>
+        </p>
         <button type="button" id="close-settings" class="ghost">Done</button>
       </section>
 
-      <section id="tab-picker" class="settings picker" hidden data-hud-solid>
+      <section id="tab-picker" class="panel picker" hidden data-hud-solid>
         <h1>New agent</h1>
-        <p class="lede">Same repo or a different one. Each tab keeps its own Cursor conversation.</p>
+        <p class="lede">Same repo or a different one. Each tab keeps its own conversation.</p>
         <button type="button" id="same-repo" class="choice" hidden></button>
         <h2>Recently opened</h2>
         <div id="recent-list" class="recent-list"></div>
         <p id="recent-empty" class="hint">No recent repos yet.</p>
         <div class="row">
-          <button type="button" id="browse-repo">Browse…</button>
-          <button type="button" id="close-picker" class="ghost">Cancel</button>
+          <button type="button" class="primary" id="browse-repo">Browse…</button>
+          <button type="button" class="ghost" id="close-picker">Cancel</button>
         </div>
       </section>
+      <div id="resize-handle" class="resize-handle" title="Resize HUD" data-hud-solid data-hud-resize></div>
     </div>
     <script src="./tabs.js"></script>
     <script src="./core.js"></script>
+    <script src="./models.js"></script>
+    <script src="./markdown.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

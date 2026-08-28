@@ -17,6 +17,50 @@
     return null;
   }
 
+  function mergeAssistantText(current, incoming) {
+    const existing = String(current || "");
+    const next = String(incoming || "");
+    if (!next) return existing;
+    if (!existing) return next;
+    if (next === existing) return existing;
+    if (next.startsWith(existing)) return next;
+    if (existing.startsWith(next)) return existing;
+    return existing + next;
+  }
+
+  function formatAssistantText(text) {
+    const raw = String(text || "");
+    if (raw.includes("```")) return raw;
+    const lines = raw.split(/\r?\n/);
+    const nonempty = lines.filter((line) => line.length > 0);
+    if (nonempty.length < 5) return raw;
+    const tokenLike = nonempty.every(
+      (line) => line.trim().split(/\s+/).length <= 3 && line.length <= 48
+    );
+    if (!tokenLike) return raw;
+    return nonempty.reduce((acc, line) => {
+      if (!acc) return line;
+      if (acc.endsWith(" ") || /^\s/.test(line)) return acc + line;
+      return `${acc} ${line.trim()}`;
+    }, "");
+  }
+
+  function upsertAssistant(next, text, finalize) {
+    let assistant = lastOfRole(next.messages, "assistant");
+    if (!assistant || !assistant.pending) {
+      assistant = {
+        id: `assistant-${next.messages.length + 1}`,
+        role: "assistant",
+        text: "",
+        pending: true,
+      };
+      next.messages.push(assistant);
+    }
+    assistant.text = mergeAssistantText(assistant.text, text);
+    assistant.pending = !finalize;
+    return assistant;
+  }
+
   function applyHudEvent(state, event) {
     if (!event || typeof event !== "object") return state;
     const next = {
@@ -38,45 +82,26 @@
         break;
       }
       case "assistant-start": {
-        next.messages.push({
-          id: event.id || `assistant-${next.messages.length + 1}`,
-          role: "assistant",
-          text: "",
-          pending: true,
-        });
-        next.status = "running";
-        break;
-      }
-      case "assistant-delta": {
-        let assistant = lastOfRole(next.messages, "assistant");
-        if (!assistant || !assistant.pending) {
-          assistant = {
+        const existing = lastOfRole(next.messages, "assistant");
+        if (!existing || !existing.pending) {
+          next.messages.push({
             id: event.id || `assistant-${next.messages.length + 1}`,
             role: "assistant",
             text: "",
             pending: true,
-          };
-          next.messages.push(assistant);
+          });
         }
-        assistant.text += String(event.text || "");
+        next.status = "running";
+        break;
+      }
+      case "assistant-delta": {
+        upsertAssistant(next, event.text, false);
+        next.status = "running";
         break;
       }
       case "assistant": {
-        let assistant = lastOfRole(next.messages, "assistant");
-        const text = String(event.text || "");
-        if (!assistant || !assistant.pending) {
-          next.messages.push({
-            id: event.id || `assistant-${next.messages.length + 1}`,
-            role: "assistant",
-            text,
-            pending: false,
-          });
-        } else if (text && text.length >= assistant.text.length) {
-          assistant.text = text;
-          assistant.pending = false;
-        } else {
-          assistant.pending = false;
-        }
+        upsertAssistant(next, event.text, false);
+        next.status = "running";
         break;
       }
       case "tool": {
@@ -106,7 +131,7 @@
       case "done": {
         const assistant = lastOfRole(next.messages, "assistant");
         if (assistant) {
-          if (event.result && !assistant.text) assistant.text = String(event.result);
+          if (event.result) assistant.text = mergeAssistantText(assistant.text, event.result);
           assistant.pending = false;
         } else if (event.result) {
           next.messages.push({
@@ -135,13 +160,21 @@
     return Boolean(hit.closest("[data-hud-solid]"));
   }
 
-  function hudIgnoresMouse({ hit, activeElement, hasFocus, forceSolid }) {
+  function hudIgnoresMouse({ hit, activeElement, hasFocus, forceSolid, ghost }) {
+    if (ghost) return true;
     if (forceSolid) return false;
     if (hasFocus && isSolidTarget(activeElement)) return false;
     return !isSolidTarget(hit);
   }
 
-  const api = { createTranscript, applyHudEvent, isSolidTarget, hudIgnoresMouse };
+  const api = {
+    createTranscript,
+    applyHudEvent,
+    mergeAssistantText,
+    formatAssistantText,
+    isSolidTarget,
+    hudIgnoresMouse,
+  };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.HudCore = api;
 })(typeof window !== "undefined" ? window : globalThis);

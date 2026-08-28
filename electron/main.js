@@ -7,7 +7,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { createNdjsonParser, encodeLine } = require("../lib/protocol");
-const { normalizeConfig } = require("../lib/config");
+const { normalizeConfig, normalizeBounds } = require("../lib/config");
 
 let hudWindow = null;
 let host = null;
@@ -16,6 +16,8 @@ const pending = new Map();
 let config = normalizeConfig({});
 let hostReady = Promise.resolve();
 let resolveHostReady = () => {};
+let ghosted = false;
+let windowDrag = null;
 
 function configPath() {
   return path.join(app.getPath("userData"), "config.json");
@@ -64,8 +66,53 @@ function emitToRenderer(data) {
   }
 }
 
+function clampBounds(bounds) {
+  const next = normalizeBounds(bounds);
+  if (!next) return null;
+  const displays = screen.getAllDisplays();
+  const onScreen = displays.some((display) => {
+    const area = display.workArea;
+    return (
+      next.x < area.x + area.width - 40 &&
+      next.x + next.width > area.x + 40 &&
+      next.y < area.y + area.height - 40 &&
+      next.y + 40 > area.y
+    );
+  });
+  if (onScreen) return next;
+  const area = screen.getPrimaryDisplay().workArea;
+  return {
+    ...next,
+    x: area.x + 28,
+    y: Math.max(area.y + 28, area.y + area.height - next.height - 28),
+  };
+}
+
+function persistBounds() {
+  if (!hudWindow || hudWindow.isDestroyed()) return;
+  clearTimeout(persistBounds.timer);
+  persistBounds.timer = setTimeout(() => {
+    if (!hudWindow || hudWindow.isDestroyed()) return;
+    saveConfig({ bounds: hudWindow.getBounds() });
+  }, 150);
+}
+
+function setGhost(on) {
+  ghosted = Boolean(on);
+  windowDrag = null;
+  if (!hudWindow || hudWindow.isDestroyed()) return;
+  if (ghosted) {
+    hudWindow.setIgnoreMouseEvents(true);
+    emitToRenderer({ event: "ghost", ghost: true });
+    return;
+  }
+  hudWindow.setIgnoreMouseEvents(false);
+  emitToRenderer({ event: "ghost", ghost: false });
+}
+
 function focusHudForTyping() {
   if (!hudWindow || hudWindow.isDestroyed()) return;
+  setGhost(false);
   hudWindow.setIgnoreMouseEvents(false);
   hudWindow.setAlwaysOnTop(true, "screen-saver");
   if (typeof hudWindow.moveTop === "function") hudWindow.moveTop();
@@ -79,12 +126,18 @@ function startHost() {
     resolveHostReady = resolve;
   });
   const hostPath = path.join(__dirname, "..", "host", "agent-host.js");
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  delete env.NO_OPEN_BROWSER;
   const child = spawn(findNodeBinary(), [hostPath], {
     stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env },
+    env,
   });
   const parse = createNdjsonParser((msg) => {
     if (msg && msg.event === "ready") resolveHostReady();
+    if (msg && msg.event === "login-url" && msg.url) {
+      shell.openExternal(msg.url).catch(() => {});
+    }
     if (msg && msg.id != null && pending.has(msg.id)) {
       const waiter = pending.get(msg.id);
       pending.delete(msg.id);
@@ -114,22 +167,26 @@ function startHost() {
 
 function createHudWindow() {
   const display = screen.getPrimaryDisplay();
-  const width = 420;
-  const height = config.compact ? 128 : 560;
-  const x = display.workArea.x + 28;
-  const y = display.workArea.y + display.workArea.height - height - 28;
+  const saved = clampBounds(config.bounds);
+  const width = saved ? saved.width : 420;
+  const height = saved ? saved.height : 560;
+  const x = saved ? saved.x : display.workArea.x + 28;
+  const y = saved ? saved.y : display.workArea.y + display.workArea.height - height - 28;
 
   hudWindow = new BrowserWindow({
     width,
     height,
     x,
     y,
+    minWidth: 320,
+    minHeight: 160,
     title: "Cursor HUD",
     frame: false,
     transparent: true,
     backgroundColor: "#00000000",
     hasShadow: false,
     resizable: true,
+    movable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -152,6 +209,8 @@ function createHudWindow() {
   hudWindow.setAlwaysOnTop(true, "screen-saver");
   hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   hudWindow.setSkipTaskbar(false);
+  hudWindow.on("moved", persistBounds);
+  hudWindow.on("resized", persistBounds);
   hudWindow.loadFile(path.join(__dirname, "..", "renderer", "index.html"));
 }
 
@@ -181,9 +240,16 @@ function registerIpc() {
     } catch {
       auth = { status: "logged-out" };
     }
+    let models = [];
+    try {
+      models = await sendToHost({ op: "models" });
+    } catch {
+      models = [];
+    }
     return {
       config: loadConfig(),
       auth,
+      models,
       platform: process.platform,
     };
   });
@@ -202,6 +268,12 @@ function registerIpc() {
 
   ipcMain.handle("hud:login", () => sendToHost({ op: "login" }));
   ipcMain.handle("hud:logout", () => sendToHost({ op: "logout" }));
+  ipcMain.handle("hud:models", () => sendToHost({ op: "models" }));
+  ipcMain.handle("hud:open-url", (_event, url) => {
+    if (typeof url === "string" && /^https?:\/\//.test(url)) {
+      return shell.openExternal(url);
+    }
+  });
   ipcMain.handle("hud:cancel", (_event, tabId) => sendToHost({ op: "cancel", tabId }));
   ipcMain.handle("hud:close-tab", (_event, tabId) => sendToHost({ op: "close-tab", tabId }));
 
@@ -224,7 +296,7 @@ function registerIpc() {
   });
 
   ipcMain.on("hud:ignore-mouse", (_event, ignore) => {
-    if (!hudWindow || hudWindow.isDestroyed()) return;
+    if (!hudWindow || hudWindow.isDestroyed() || ghosted || windowDrag) return;
     if (process.platform === "linux") {
       hudWindow.setIgnoreMouseEvents(false);
       return;
@@ -238,24 +310,51 @@ function registerIpc() {
   ipcMain.on("hud:compact", (_event, compact) => {
     if (!hudWindow || hudWindow.isDestroyed()) return;
     saveConfig({ compact: Boolean(compact) });
-    const display = screen.getDisplayMatching(hudWindow.getBounds());
-    const width = hudWindow.getBounds().width;
-    const height = compact ? 128 : 560;
-    const x = hudWindow.getBounds().x;
-    const y = display.workArea.y + display.workArea.height - height - 28;
-    hudWindow.setBounds({ x, y, width, height });
+  });
+
+  ipcMain.on("hud:drag-start", (_event, kind) => {
+    if (!hudWindow || hudWindow.isDestroyed() || ghosted) return;
+    const cursor = screen.getCursorScreenPoint();
+    const bounds = hudWindow.getBounds();
+    windowDrag = {
+      kind: kind === "resize" ? "resize" : "move",
+      dx: cursor.x - bounds.x,
+      dy: cursor.y - bounds.y,
+      start: { ...bounds, cursorX: cursor.x, cursorY: cursor.y },
+    };
+    hudWindow.setIgnoreMouseEvents(false);
+  });
+
+  ipcMain.on("hud:drag-move", () => {
+    if (!windowDrag || !hudWindow || hudWindow.isDestroyed()) return;
+    const cursor = screen.getCursorScreenPoint();
+    if (windowDrag.kind === "resize") {
+      hudWindow.setBounds({
+        x: windowDrag.start.x,
+        y: windowDrag.start.y,
+        width: Math.max(320, windowDrag.start.width + (cursor.x - windowDrag.start.cursorX)),
+        height: Math.max(160, windowDrag.start.height + (cursor.y - windowDrag.start.cursorY)),
+      });
+      return;
+    }
+    hudWindow.setPosition(cursor.x - windowDrag.dx, cursor.y - windowDrag.dy);
+  });
+
+  ipcMain.on("hud:drag-end", () => {
+    windowDrag = null;
+    persistBounds();
   });
 }
 
 function registerHotkeys() {
   globalShortcut.register("CommandOrControl+Shift+H", () => {
     if (!hudWindow) return;
-    if (hudWindow.isVisible() && hudWindow.isFocused()) {
-      hudWindow.hide();
+    if (ghosted) {
+      focusHudForTyping();
+      emitToRenderer({ event: "focus-composer" });
       return;
     }
-    focusHudForTyping();
-    emitToRenderer({ event: "focus-composer" });
+    setGhost(true);
   });
 }
 

@@ -43,9 +43,13 @@ describe("tabs", () => {
       ],
       activeTabId: "tab-b",
       recentWorkspaces: ["/beta", "/alpha", "/old"],
+      model: "auto",
+      modelParams: [{ id: "fast", value: "true" }],
     });
     assert.equal(cfg.activeTabId, "tab-b");
     assert.equal(cfg.workspace, "/beta");
+    assert.equal(cfg.model, "auto");
+    assert.equal(cfg.modelParams[0].id, "fast");
     assert.deepEqual(
       cfg.tabs.map((tab) => tab.workspace),
       ["/alpha", "/beta"]

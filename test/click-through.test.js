@@ -48,4 +48,17 @@ describe("click-through", () => {
       false
     );
   });
+
+  it("is fully click-through while ghosted, even over the composer", () => {
+    assert.equal(
+      hudIgnoresMouse({
+        hit: el("[data-hud-solid]"),
+        activeElement: el("[data-hud-solid]"),
+        hasFocus: true,
+        forceSolid: true,
+        ghost: true,
+      }),
+      true
+    );
+  });
 });

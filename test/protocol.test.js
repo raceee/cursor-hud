@@ -38,5 +38,16 @@ describe("config", () => {
     assert.equal(cfg.attachScreen, true);
     assert.equal(validateWorkspace(""), "Pick the project folder Cursor should work in.");
     assert.equal(validateWorkspace(cfg.workspace), null);
+    assert.equal(cfg.bounds, null);
+  });
+
+  it("keeps a saved window position", () => {
+    const { normalizeBounds } = require("../lib/config");
+    assert.deepEqual(normalizeBounds({ x: 10.4, y: 20.6, width: 200, height: 80 }), {
+      x: 10,
+      y: 21,
+      width: 320,
+      height: 160,
+    });
   });
 });

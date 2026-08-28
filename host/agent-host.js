@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { encodeLine, extractAssistantText } = require("../lib/protocol");
 const { normalizeConfig, validateWorkspace } = require("../lib/config");
+const { flattenModelOptions, optionKey } = require("../lib/models");
 
 function write(obj) {
   process.stdout.write(encodeLine(obj));
@@ -25,10 +26,12 @@ async function loadSdk() {
 
 function toHudAssistantDelta(update) {
   if (!update) return null;
-  if (update.type === "text-delta" && update.text) {
-    return { kind: "assistant-delta", text: update.text };
+  if (update.type !== "text-delta" || update.text == null || update.text === "") return null;
+  let text = String(update.text);
+  if (text.length > 1 && text.endsWith("\n") && !text.endsWith("\n\n")) {
+    text = text.slice(0, -1);
   }
-  return null;
+  return { kind: "assistant-delta", text };
 }
 
 class AgentHost {
@@ -48,29 +51,53 @@ class AgentHost {
     await this.emitAuth();
   }
 
-  async emitAuth() {
-    const { Cursor } = this.sdk;
-    let status = { status: "logged-out" };
+  async emitAuth(status) {
+    let next = status;
+    if (!next) {
+      next = { status: "logged-out" };
+      try {
+        next = await this.sdk.Cursor.auth.status();
+      } catch (err) {
+        log("auth status failed", err.message);
+      }
+    }
+    if (process.env.CURSOR_API_KEY && next.status !== "logged-in") {
+      next = { status: "logged-in", email: "CURSOR_API_KEY", source: "env" };
+    }
+    write({ event: "auth", ...next });
+    if (next.status === "logged-in") {
+      await this.emitModels().catch((err) => log("models failed", err.message));
+    }
+    return next;
+  }
+
+  async emitModels() {
+    let models = [];
     try {
-      status = await Cursor.auth.status();
+      models = await this.sdk.Cursor.models.list();
     } catch (err) {
-      log("auth status failed", err.message);
+      log("models.list failed", err.message);
     }
-    if (process.env.CURSOR_API_KEY && status.status !== "logged-in") {
-      status = { status: "logged-in", email: "CURSOR_API_KEY", source: "env" };
-    }
-    write({ event: "auth", ...status });
-    return status;
+    const options = flattenModelOptions(models);
+    write({ event: "models", options });
+    return options;
   }
 
   async login() {
     const { Cursor } = this.sdk;
+    write({ event: "login-pending" });
     const result = await Cursor.auth.login({
       apiKeyName: "Cursor HUD",
+      openBrowser: (url) => write({ event: "login-url", url }),
       onLoginUrl: (url) => write({ event: "login-url", url }),
     });
-    await this.emitAuth();
-    return { email: result.email || null };
+    const status = {
+      status: "logged-in",
+      email: result.email || "signed in",
+      apiKeyExpiresAtMs: result.apiKeyExpiresAtMs,
+    };
+    await this.emitAuth(status);
+    return status;
   }
 
   async logout() {
@@ -84,7 +111,18 @@ class AgentHost {
   }
 
   configure(patch) {
+    const prev = optionKey({
+      id: this.config.model,
+      params: this.config.modelParams,
+    });
     this.config = normalizeConfig({ ...this.config, ...patch });
+    const next = optionKey({
+      id: this.config.model,
+      params: this.config.modelParams,
+    });
+    if (prev !== next) {
+      for (const session of this.sessions.values()) this.disposeSession(session);
+    }
     return this.config;
   }
 
@@ -137,8 +175,12 @@ class AgentHost {
     this.disposeSession(session);
     session.workspace = folder;
     const { Agent } = this.sdk;
+    const model = { id: this.config.model || "composer-2.5" };
+    if (this.config.modelParams && this.config.modelParams.length) {
+      model.params = this.config.modelParams;
+    }
     session.agent = await Agent.create({
-      model: { id: this.config.model || "composer-2.5" },
+      model,
       local: { cwd: path.resolve(folder) },
     });
     write({ event: "agent", tabId, agentId: session.agent.agentId, workspace: folder });
@@ -161,10 +203,14 @@ class AgentHost {
       : prompt;
 
     try {
+      let sawTextDelta = false;
       const run = await session.agent.send(payload, {
         onDelta: ({ update }) => {
           const hud = toHudAssistantDelta(update);
-          if (hud) this.hud(tabId, hud);
+          if (hud) {
+            sawTextDelta = true;
+            this.hud(tabId, hud);
+          }
         },
       });
       session.currentRun = run;
@@ -178,8 +224,9 @@ class AgentHost {
             status: event.status,
           });
         } else if (event.type === "assistant") {
-          const snapshot = extractAssistantText(event);
-          if (snapshot) this.hud(tabId, { kind: "assistant", text: snapshot });
+          if (sawTextDelta) continue;
+          const chunk = extractAssistantText(event);
+          if (chunk) this.hud(tabId, { kind: "assistant-delta", text: chunk });
         } else if (event.type === "status") {
           this.hud(tabId, { kind: "status", status: String(event.status).toLowerCase() });
         } else if (event.type === "thinking") {
@@ -236,6 +283,7 @@ async function main() {
         if (op === "status") result = await host.emitAuth();
         else if (op === "login") result = await host.login();
         else if (op === "logout") result = await host.logout();
+        else if (op === "models") result = await host.emitModels();
         else if (op === "configure") result = host.configure(msg.config || {});
         else if (op === "cancel") result = await host.cancel(msg.tabId);
         else if (op === "close-tab") result = host.closeTab(msg.tabId);
