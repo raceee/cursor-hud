@@ -32,8 +32,8 @@ describe("protocol", () => {
 
 describe("config", () => {
   it("fills defaults and rejects an empty workspace", () => {
-    const cfg = normalizeConfig({ workspace: "  /wow  ", attachScreen: 1 });
-    assert.equal(cfg.workspace, "/wow");
+    const cfg = normalizeConfig({ workspace: "  /app  ", attachScreen: 1 });
+    assert.equal(cfg.workspace, "/app");
     assert.equal(cfg.mode, "agent");
     assert.equal(cfg.model, "composer-2.5");
     assert.equal(cfg.attachScreen, true);

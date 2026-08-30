@@ -1,20 +1,21 @@
 {
   "name": "cursor-hud",
   "version": "0.1.0",
-  "description": "Always-on-top Cursor chat HUD for WoW Classic, Retail, and other borderless games.",
+  "description": "Always-on-top Cursor chat HUD.",
   "main": "electron/main.js",
   "scripts": {
     "start": "node scripts/start.js",
     "start:linux": "node scripts/start.js --no-sandbox --disable-gpu",
     "test": "node --test test/*.test.js",
-    "host": "node host/agent-host.js"
+    "host": "node host/agent-host.js",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir"
   },
   "engines": {
     "node": ">=22.13"
   },
   "keywords": [
     "cursor",
-    "wow",
     "overlay",
     "hud"
   ],
@@ -23,9 +24,48 @@
     "@cursor/sdk": "^1.0.30"
   },
   "devDependencies": {
-    "electron": "^37.10.3"
+    "electron": "^37.10.3",
+    "electron-builder": "^26.15.3"
   },
   "allowScripts": {
     "electron@37.10.3": true
+  },
+  "build": {
+    "appId": "dev.cursorhud.app",
+    "productName": "Cursor HUD",
+    "asar": false,
+    "files": [
+      "electron/**/*",
+      "host/**/*",
+      "lib/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "afterPack": "scripts/after-pack.js",
+    "directories": {
+      "output": "dist"
+    },
+    "mac": {
+      "category": "public.app-category.developer-tools",
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "win": {
+      "target": [
+        "portable",
+        "zip"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

@@ -7,15 +7,15 @@ const { createTranscript, applyHudEvent } = require("../lib/transcript");
 describe("transcript", () => {
   it("streams a user prompt and assistant deltas into one pending reply", () => {
     let state = createTranscript();
-    state = applyHudEvent(state, { kind: "user", text: "What quest is this?" });
+    state = applyHudEvent(state, { kind: "user", text: "What does this function do?" });
     state = applyHudEvent(state, { kind: "assistant-start" });
     state = applyHudEvent(state, { kind: "assistant-delta", text: "That's " });
-    state = applyHudEvent(state, { kind: "assistant-delta", text: "The Stockade." });
-    state = applyHudEvent(state, { kind: "done", result: "That's The Stockade.", status: "finished" });
+    state = applyHudEvent(state, { kind: "assistant-delta", text: "the formatter." });
+    state = applyHudEvent(state, { kind: "done", result: "That's the formatter.", status: "finished" });
 
     assert.equal(state.messages.length, 2);
     assert.equal(state.messages[0].role, "user");
-    assert.equal(state.messages[1].text, "That's The Stockade.");
+    assert.equal(state.messages[1].text, "That's the formatter.");
     assert.equal(state.messages[1].pending, false);
     assert.equal(state.status, "idle");
   });
@@ -71,8 +71,8 @@ describe("transcript", () => {
 
   it("joins token-per-line dumps into a paragraph", () => {
     const { formatAssistantText } = require("../lib/transcript");
-    const dumped = ["The", "HUD", "stays", "put", "over", "the", "game."].join("\n");
-    assert.equal(formatAssistantText(dumped), "The HUD stays put over the game.");
+    const dumped = ["The", "HUD", "stays", "put", "over", "the", "app."].join("\n");
+    assert.equal(formatAssistantText(dumped), "The HUD stays put over the app.");
     assert.equal(formatAssistantText("Line one.\n\nLine two."), "Line one.\n\nLine two.");
     assert.equal(
       formatAssistantText("- one\n- two\n- three\n- four\n- five"),

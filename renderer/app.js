@@ -243,7 +243,7 @@ function setAuth(auth) {
   document.getElementById("setup-auth-state").textContent = signedIn ? "Signed in" : "Signed out";
   document.getElementById("setup-auth-detail").textContent = signedIn
     ? email
-    : "Sign in to use Cursor agents from this overlay.";
+    : "Sign in to use Cursor agents.";
   document.getElementById("login").disabled = signedIn;
   document.getElementById("logout").disabled = !signedIn;
   if (signedIn) {
