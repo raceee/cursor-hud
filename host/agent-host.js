@@ -5,6 +5,7 @@ const path = require("node:path");
 const { encodeLine, extractAssistantText } = require("../lib/protocol");
 const { normalizeConfig, validateWorkspace } = require("../lib/config");
 const { flattenModelOptions, optionKey } = require("../lib/models");
+const { resolveModeOptions, normalizeMode } = require("../lib/modes");
 
 function write(obj) {
   process.stdout.write(encodeLine(obj));
@@ -111,16 +112,18 @@ class AgentHost {
   }
 
   configure(patch) {
-    const prev = optionKey({
+    const prevModel = optionKey({
       id: this.config.model,
       params: this.config.modelParams,
     });
+    const prevMode = normalizeMode(this.config.mode);
     this.config = normalizeConfig({ ...this.config, ...patch });
-    const next = optionKey({
+    const nextModel = optionKey({
       id: this.config.model,
       params: this.config.modelParams,
     });
-    if (prev !== next) {
+    const nextMode = normalizeMode(this.config.mode);
+    if (prevModel !== nextModel || prevMode !== nextMode) {
       for (const session of this.sessions.values()) this.disposeSession(session);
     }
     return this.config;
@@ -179,10 +182,15 @@ class AgentHost {
     if (this.config.modelParams && this.config.modelParams.length) {
       model.params = this.config.modelParams;
     }
-    session.agent = await Agent.create({
+    const mode = resolveModeOptions(this.config.mode);
+    const createOptions = {
       model,
+      mode: mode.sdkMode,
       local: { cwd: path.resolve(folder) },
-    });
+    };
+    if (mode.tools) createOptions.tools = mode.tools;
+    if (mode.disallowedTools) createOptions.disallowedTools = mode.disallowedTools;
+    session.agent = await Agent.create(createOptions);
     write({ event: "agent", tabId, agentId: session.agent.agentId, workspace: folder });
     return session;
   }
@@ -204,7 +212,9 @@ class AgentHost {
 
     try {
       let sawTextDelta = false;
+      const mode = resolveModeOptions(this.config.mode);
       const run = await session.agent.send(payload, {
+        mode: mode.sdkMode,
         onDelta: ({ update }) => {
           const hud = toHudAssistantDelta(update);
           if (hud) {

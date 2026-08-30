@@ -2,6 +2,7 @@
 
 const core = window.HudCore;
 const tabLib = window.HudTabs;
+const modesLib = window.HudModes;
 const modelsLib = window.HudModels;
 const markdown = window.HudMarkdown;
 const hud = window.cursorHud;
@@ -20,6 +21,11 @@ const els = {
   settings: document.getElementById("settings"),
   picker: document.getElementById("tab-picker"),
   workspace: document.getElementById("workspace"),
+  modeChip: document.getElementById("mode-chip"),
+  modeIcon: document.getElementById("mode-icon"),
+  modeLabel: document.getElementById("mode-label"),
+  modeMenu: document.getElementById("mode-menu"),
+  modeList: document.getElementById("mode-list"),
   modelChip: document.getElementById("model-chip"),
   modelLabel: document.getElementById("model-label"),
   modelMenu: document.getElementById("model-menu"),
@@ -34,6 +40,7 @@ const els = {
 
 let config = {
   workspace: "",
+  mode: "agent",
   model: "composer-2.5",
   modelParams: [],
   attachScreen: false,
@@ -61,6 +68,47 @@ function persist() {
     recentWorkspaces,
     workspace: current ? current.workspace : "",
   });
+}
+
+function selectedMode() {
+  return modesLib.getMode(config.mode);
+}
+
+function renderModeMenu() {
+  els.modeList.innerHTML = "";
+  const current = selectedMode().id;
+  for (const mode of modesLib.listModes()) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `menu-item${mode.id === current ? " selected" : ""}`;
+    const name = document.createElement("span");
+    name.className = "name";
+    const label = document.createElement("span");
+    label.textContent = mode.label;
+    name.appendChild(label);
+    if (mode.description) {
+      const desc = document.createElement("span");
+      desc.className = "desc";
+      desc.textContent = mode.description;
+      name.appendChild(desc);
+    }
+    btn.appendChild(name);
+    btn.addEventListener("click", () => {
+      config.mode = mode.id;
+      els.modeMenu.hidden = true;
+      persist();
+      renderModeChip();
+    });
+    els.modeList.appendChild(btn);
+  }
+}
+
+function renderModeChip() {
+  const mode = selectedMode();
+  els.modeLabel.textContent = mode.label;
+  els.modeIcon.innerHTML = modesLib.modeIconSvg(mode.id);
+  els.modeChip.title = `${mode.label} mode`;
+  els.prompt.placeholder = mode.placeholder || els.prompt.placeholder;
 }
 
 function selectedModel() {
@@ -180,6 +228,7 @@ function renderThread() {
 function render() {
   renderTabs();
   renderThread();
+  renderModeChip();
   renderModelChip();
 }
 
@@ -222,10 +271,12 @@ function setLoginPending(url) {
 
 function applyConfig(next) {
   config = { ...config, ...next };
+  config.mode = modesLib.normalizeMode(config.mode);
   if (!Array.isArray(config.modelParams)) config.modelParams = [];
   els.attachScreen.checked = Boolean(config.attachScreen);
   els.shell.classList.toggle("is-compact", Boolean(config.compact));
   document.getElementById("toggle-compact").textContent = config.compact ? "Show" : "Hide";
+  renderModeChip();
   renderModelChip();
 }
 
@@ -278,7 +329,7 @@ async function closeTab(tabId) {
 }
 
 function overlayOpen() {
-  return !els.settings.hidden || !els.picker.hidden || !els.modelMenu.hidden;
+  return !els.settings.hidden || !els.picker.hidden || !els.modelMenu.hidden || !els.modeMenu.hidden;
 }
 
 function bindWindowChrome(handle, kind) {
@@ -380,6 +431,13 @@ async function startLogin() {
   }
 }
 
+els.messages.addEventListener("click", (event) => {
+  const link = event.target.closest("a.md-link");
+  if (!link || !link.href) return;
+  event.preventDefault();
+  hud.openUrl(link.href);
+});
+
 els.form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const tab = activeTab();
@@ -427,6 +485,7 @@ els.prompt.addEventListener("keydown", (event) => {
     els.picker.hidden = true;
     els.settings.hidden = true;
     els.modelMenu.hidden = true;
+    els.modeMenu.hidden = true;
     els.prompt.blur();
     hud.setIgnoreMouse(true);
   }
@@ -468,9 +527,19 @@ document.getElementById("logout").addEventListener("click", async () => {
 });
 els.modelChip.addEventListener("click", () => {
   const open = els.modelMenu.hidden;
+  els.modeMenu.hidden = true;
   els.modelMenu.hidden = !open;
   if (open) {
     renderModelMenu();
+    hud.setIgnoreMouse(false);
+  }
+});
+els.modeChip.addEventListener("click", () => {
+  const open = els.modeMenu.hidden;
+  els.modelMenu.hidden = true;
+  els.modeMenu.hidden = !open;
+  if (open) {
+    renderModeMenu();
     hud.setIgnoreMouse(false);
   }
 });

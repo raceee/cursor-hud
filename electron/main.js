@@ -368,8 +368,12 @@ app.whenReady().then(() => {
 
 app.on("web-contents-created", (_event, contents) => {
   contents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
     return { action: "deny" };
+  });
+  contents.on("will-navigate", (event, url) => {
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
   });
 });
 

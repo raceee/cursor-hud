@@ -43,11 +43,14 @@
           inputmode="text"
         ></textarea>
         <div class="composer-bar">
-          <button type="button" class="chip" id="mode-chip" title="Agent mode" disabled>
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M8 1.6 9.7 6h4.6L10.8 8.8 12.4 13 8 10.4 3.6 13l1.6-4.2L1.7 6h4.6L8 1.6Z" />
-            </svg>
-            Agent
+          <button type="button" class="chip" id="mode-chip" title="Mode">
+            <span id="mode-icon" class="mode-icon" aria-hidden="true">
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M8 1.6 9.7 6h4.6L10.8 8.8 12.4 13 8 10.4 3.6 13l1.6-4.2L1.7 6h4.6L8 1.6Z" />
+              </svg>
+            </span>
+            <span id="mode-label">Agent</span>
+            <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 8l3-3.5" /></svg>
           </button>
           <button type="button" class="chip" id="model-chip" title="Model">
             <span id="model-label">Composer 2.5</span>
@@ -69,6 +72,11 @@
           </button>
         </div>
       </form>
+
+      <div id="mode-menu" class="menu mode-menu" hidden data-hud-solid>
+        <div class="menu-title">Mode</div>
+        <div id="mode-list" class="menu-list"></div>
+      </div>
 
       <div id="model-menu" class="menu" hidden data-hud-solid>
         <div class="menu-title">Models</div>
@@ -119,6 +127,7 @@
     </div>
     <script src="./tabs.js"></script>
     <script src="./core.js"></script>
+    <script src="./modes.js"></script>
     <script src="./models.js"></script>
     <script src="./markdown.js"></script>
     <script src="./app.js"></script>

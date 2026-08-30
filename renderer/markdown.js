@@ -206,21 +206,305 @@
     return tokens;
   }
 
+  function safeHref(href) {
+    const raw = String(href || "").trim();
+    if (/^https?:\/\//i.test(raw)) return raw;
+    return "";
+  }
+
+  function findClose(s, from, mark) {
+    let idx = from;
+    while (idx < s.length) {
+      const at = s.indexOf(mark, idx);
+      if (at === -1) return -1;
+      if (at > from) return at;
+      idx = at + mark.length;
+    }
+    return -1;
+  }
+
+  function matchLink(s, i) {
+    if (s[i] !== "[") return null;
+    const close = s.indexOf("]", i + 1);
+    if (close === -1 || close === i + 1) return null;
+    if (s[close + 1] !== "(") return null;
+    const endParen = s.indexOf(")", close + 2);
+    if (endParen === -1) return null;
+    const href = safeHref(s.slice(close + 2, endParen));
+    if (!href) return null;
+    return { text: s.slice(i + 1, close), href, end: endParen + 1 };
+  }
+
+  function parseInline(input) {
+    const s = String(input || "");
+    const tokens = [];
+    let i = 0;
+
+    function pushText(text) {
+      if (!text) return;
+      const last = tokens[tokens.length - 1];
+      if (last && last.type === "text") last.text += text;
+      else tokens.push({ type: "text", text });
+    }
+
+    while (i < s.length) {
+      if (s[i] === "`") {
+        const close = s.indexOf("`", i + 1);
+        if (close > i + 1) {
+          tokens.push({ type: "code", text: s.slice(i + 1, close) });
+          i = close + 1;
+          continue;
+        }
+      }
+      if (s.startsWith("![", i)) {
+        const img = matchLink(s, i + 1);
+        if (img) {
+          pushText(img.text || "image");
+          i = img.end;
+          continue;
+        }
+      }
+      if (s[i] === "[") {
+        const link = matchLink(s, i);
+        if (link) {
+          tokens.push({ type: "link", href: link.href, children: parseInline(link.text) });
+          i = link.end;
+          continue;
+        }
+      }
+      if (s.startsWith("~~", i)) {
+        const close = findClose(s, i + 2, "~~");
+        if (close !== -1) {
+          tokens.push({ type: "del", children: parseInline(s.slice(i + 2, close)) });
+          i = close + 2;
+          continue;
+        }
+      }
+      if (s.startsWith("***", i) || s.startsWith("___", i)) {
+        const mark = s.slice(i, i + 3);
+        const close = findClose(s, i + 3, mark);
+        if (close !== -1) {
+          tokens.push({
+            type: "strong",
+            children: [{ type: "em", children: parseInline(s.slice(i + 3, close)) }],
+          });
+          i = close + 3;
+          continue;
+        }
+      }
+      if (s.startsWith("**", i) || s.startsWith("__", i)) {
+        const mark = s.slice(i, i + 2);
+        const close = findClose(s, i + 2, mark);
+        if (close !== -1) {
+          tokens.push({ type: "strong", children: parseInline(s.slice(i + 2, close)) });
+          i = close + 2;
+          continue;
+        }
+      }
+      if (s[i] === "*" || s[i] === "_") {
+        const mark = s[i];
+        const flanked = s[i + 1] && !/\s/.test(s[i + 1]);
+        const wordy = mark === "_" && i > 0 && /[A-Za-z0-9]/.test(s[i - 1]);
+        if (flanked && !wordy) {
+          let close = -1;
+          for (let j = i + 1; j < s.length; j += 1) {
+            if (s[j] !== mark) continue;
+            if (/\s/.test(s[j - 1])) continue;
+            if (mark === "_" && /[A-Za-z0-9]/.test(s[j + 1] || "")) continue;
+            if (s[j + 1] === mark) continue;
+            close = j;
+            break;
+          }
+          if (close > i + 1) {
+            tokens.push({ type: "em", children: parseInline(s.slice(i + 1, close)) });
+            i = close + 1;
+            continue;
+          }
+        }
+      }
+      pushText(s[i]);
+      i += 1;
+    }
+    return tokens;
+  }
+
+  function isHr(line) {
+    return /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/.test(line) && !/^\s*[-*+]\s+\S/.test(line);
+  }
+
+  function headingMatch(line) {
+    return String(line || "").match(/^\s{0,3}(#{1,6})\s+(.+?)(?:\s+#+\s*)?$/);
+  }
+
+  function listMarker(line) {
+    const m = String(line || "").match(/^(\s*)([-*+]|\d+[.)])\s+(.*)$/);
+    if (!m) return null;
+    return { indent: m[1].length, ordered: /^\d/.test(m[2]), text: m[3] };
+  }
+
+  function splitTableRow(line) {
+    let t = String(line || "").trim();
+    if (t.startsWith("|")) t = t.slice(1);
+    if (t.endsWith("|")) t = t.slice(0, -1);
+    return t.split("|").map((cell) => cell.trim());
+  }
+
+  function isTableSep(line) {
+    const cells = splitTableRow(line);
+    return cells.length > 0 && cells.every((cell) => /^:?-+:?$/.test(cell.replace(/\s/g, "")));
+  }
+
+  function parseList(lines, start) {
+    const first = listMarker(lines[start]);
+    const baseIndent = first.indent;
+    const ordered = first.ordered;
+    const items = [];
+    let i = start;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^\s*$/.test(line)) {
+        const peek = listMarker(lines[i + 1] || "");
+        if (peek && peek.indent >= baseIndent) {
+          i += 1;
+          continue;
+        }
+        break;
+      }
+      const marker = listMarker(line);
+      if (marker && marker.indent < baseIndent) break;
+      if (marker && marker.indent === baseIndent) {
+        if (marker.ordered !== ordered) break;
+        items.push({ text: marker.text, children: null });
+        i += 1;
+        continue;
+      }
+      if (marker && marker.indent > baseIndent && items.length) {
+        const nested = parseList(lines, i);
+        items[items.length - 1].children = nested.block;
+        i = nested.next;
+        continue;
+      }
+      if (!marker && items.length) {
+        const indent = line.match(/^(\s*)/)[1].length;
+        if (indent > baseIndent) {
+          items[items.length - 1].text += `\n${line.trim()}`;
+          i += 1;
+          continue;
+        }
+      }
+      break;
+    }
+    return { block: { type: "list", ordered, items }, next: i };
+  }
+
+  function parseProseBlocks(input) {
+    const lines = String(input || "").split(/\n/);
+    const blocks = [];
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      if (/^\s*$/.test(line)) {
+        i += 1;
+        continue;
+      }
+      if (isHr(line)) {
+        blocks.push({ type: "hr" });
+        i += 1;
+        continue;
+      }
+      const heading = headingMatch(line);
+      if (heading) {
+        blocks.push({ type: "heading", level: heading[1].length, text: heading[2].trim() });
+        i += 1;
+        continue;
+      }
+      if (/^\s{0,3}>/.test(line)) {
+        const quoted = [];
+        while (i < lines.length) {
+          if (/^\s{0,3}>/.test(lines[i])) {
+            quoted.push(lines[i].replace(/^\s{0,3}>\s?/, ""));
+            i += 1;
+            continue;
+          }
+          if (/^\s*$/.test(lines[i]) && /^\s{0,3}>/.test(lines[i + 1] || "")) {
+            quoted.push("");
+            i += 1;
+            continue;
+          }
+          break;
+        }
+        blocks.push({ type: "blockquote", children: parseProseBlocks(quoted.join("\n")) });
+        continue;
+      }
+      if (line.includes("|") && isTableSep(lines[i + 1] || "")) {
+        const headers = splitTableRow(line);
+        i += 2;
+        const rows = [];
+        while (i < lines.length && lines[i].includes("|") && !isHr(lines[i]) && !headingMatch(lines[i])) {
+          rows.push(splitTableRow(lines[i]));
+          i += 1;
+        }
+        blocks.push({ type: "table", headers, rows });
+        continue;
+      }
+      if (listMarker(line)) {
+        const list = parseList(lines, i);
+        blocks.push(list.block);
+        i = list.next;
+        continue;
+      }
+      const para = [line];
+      i += 1;
+      while (i < lines.length) {
+        const next = lines[i];
+        if (/^\s*$/.test(next) || isHr(next) || headingMatch(next) || listMarker(next) || /^\s{0,3}>/.test(next)) {
+          break;
+        }
+        if (next.includes("|") && isTableSep(lines[i + 1] || "")) break;
+        para.push(next);
+        i += 1;
+      }
+      blocks.push({ type: "paragraph", text: para.join("\n") });
+    }
+    return blocks;
+  }
+
   function appendTextWithInline(parent, text) {
-    const parts = String(text || "").split(/(`[^`]+`|\*\*[^*\n]+\*\*)/g);
-    for (const part of parts) {
-      if (!part) continue;
-      if (part.startsWith("`") && part.endsWith("`") && part.length >= 2) {
+    renderInline(parent, parseInline(text));
+  }
+
+  function renderInline(parent, tokens) {
+    for (const token of tokens) {
+      if (token.type === "text") {
+        const parts = String(token.text || "").split("\n");
+        parts.forEach((part, idx) => {
+          if (idx) parent.appendChild(document.createElement("br"));
+          if (part) parent.appendChild(document.createTextNode(part));
+        });
+        continue;
+      }
+      if (token.type === "code") {
         const code = document.createElement("code");
         code.className = "md-inline-code";
-        code.textContent = part.slice(1, -1);
+        code.textContent = token.text;
         parent.appendChild(code);
-      } else if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
-        const strong = document.createElement("strong");
-        strong.textContent = part.slice(2, -2);
-        parent.appendChild(strong);
-      } else {
-        parent.appendChild(document.createTextNode(part));
+        continue;
+      }
+      if (token.type === "link") {
+        const a = document.createElement("a");
+        a.className = "md-link";
+        a.href = token.href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        renderInline(a, token.children || []);
+        parent.appendChild(a);
+        continue;
+      }
+      const tag = token.type === "strong" ? "strong" : token.type === "em" ? "em" : token.type === "del" ? "del" : "";
+      if (tag) {
+        const el = document.createElement(tag);
+        renderInline(el, token.children || []);
+        parent.appendChild(el);
       }
     }
   }
@@ -264,6 +548,87 @@
     parent.appendChild(preview);
   }
 
+  function taskItem(text) {
+    const m = String(text || "").match(/^\[([ xX])\]\s+([\s\S]*)$/);
+    if (!m) return null;
+    return { checked: m[1] !== " ", text: m[2] };
+  }
+
+  function renderProse(parent, blocks) {
+    for (const block of blocks) {
+      if (block.type === "heading") {
+        const heading = document.createElement(`h${Math.min(6, Math.max(1, block.level))}`);
+        heading.className = "md-h";
+        appendTextWithInline(heading, block.text);
+        parent.appendChild(heading);
+        continue;
+      }
+      if (block.type === "hr") {
+        parent.appendChild(document.createElement("hr"));
+        continue;
+      }
+      if (block.type === "blockquote") {
+        const quote = document.createElement("blockquote");
+        quote.className = "md-quote";
+        renderProse(quote, block.children || []);
+        parent.appendChild(quote);
+        continue;
+      }
+      if (block.type === "list") {
+        const list = document.createElement(block.ordered ? "ol" : "ul");
+        list.className = "md-list";
+        for (const item of block.items || []) {
+          const li = document.createElement("li");
+          const task = taskItem(item.text);
+          if (task) {
+            li.className = "md-task";
+            const mark = document.createElement("span");
+            mark.className = `md-check${task.checked ? " is-done" : ""}`;
+            mark.textContent = task.checked ? "☑" : "☐";
+            li.appendChild(mark);
+            appendTextWithInline(li, task.text);
+          } else {
+            appendTextWithInline(li, item.text);
+          }
+          if (item.children) renderProse(li, [item.children]);
+          list.appendChild(li);
+        }
+        parent.appendChild(list);
+        continue;
+      }
+      if (block.type === "table") {
+        const table = document.createElement("table");
+        table.className = "md-table";
+        const thead = document.createElement("thead");
+        const headRow = document.createElement("tr");
+        for (const cell of block.headers || []) {
+          const th = document.createElement("th");
+          appendTextWithInline(th, cell);
+          headRow.appendChild(th);
+        }
+        thead.appendChild(headRow);
+        table.appendChild(thead);
+        const tbody = document.createElement("tbody");
+        for (const row of block.rows || []) {
+          const tr = document.createElement("tr");
+          for (const cell of row) {
+            const td = document.createElement("td");
+            appendTextWithInline(td, cell);
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        parent.appendChild(table);
+        continue;
+      }
+      const p = document.createElement("p");
+      p.className = "md-p";
+      appendTextWithInline(p, block.text || "");
+      parent.appendChild(p);
+    }
+  }
+
   function renderMarkdown(parent, text) {
     parent.textContent = "";
     const blocks = parseMarkdownBlocks(text);
@@ -273,14 +638,16 @@
         continue;
       }
       const body = document.createElement("div");
-      body.className = "md-text";
-      appendTextWithInline(body, block.text);
-      parent.appendChild(body);
+      body.className = "md-prose";
+      renderProse(body, parseProseBlocks(block.text));
+      if (body.childNodes.length) parent.appendChild(body);
     }
   }
 
   const api = {
     parseMarkdownBlocks,
+    parseProseBlocks,
+    parseInline,
     parseFenceInfo,
     langFromPath,
     highlightCode,

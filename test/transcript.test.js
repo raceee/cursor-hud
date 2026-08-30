@@ -74,5 +74,9 @@ describe("transcript", () => {
     const dumped = ["The", "HUD", "stays", "put", "over", "the", "game."].join("\n");
     assert.equal(formatAssistantText(dumped), "The HUD stays put over the game.");
     assert.equal(formatAssistantText("Line one.\n\nLine two."), "Line one.\n\nLine two.");
+    assert.equal(
+      formatAssistantText("- one\n- two\n- three\n- four\n- five"),
+      "- one\n- two\n- three\n- four\n- five"
+    );
   });
 });

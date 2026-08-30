@@ -28,9 +28,13 @@
     return existing + next;
   }
 
+  function looksLikeMarkdown(text) {
+    return /^(?:#{1,6}\s|[-*+]\s|\d+[.)]\s|>\s|\|)/m.test(String(text || "").trim());
+  }
+
   function formatAssistantText(text) {
     const raw = String(text || "");
-    if (raw.includes("```")) return raw;
+    if (raw.includes("```") || looksLikeMarkdown(raw)) return raw;
     const lines = raw.split(/\r?\n/);
     const nonempty = lines.filter((line) => line.length > 0);
     if (nonempty.length < 5) return raw;
