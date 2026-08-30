@@ -104,6 +104,11 @@
         <p class="hotkey">
           Ghost overlay (stays put, click-through): <kbd>⌘</kbd><kbd>Shift</kbd><kbd>H</kbd>
         </p>
+        <label class="toggle">
+          <input type="checkbox" id="debug-traces" checked />
+          Local debug traces
+        </label>
+        <p class="hint">Writes <code>debug/latest.json</code> so this session can be inspected. No API keys.</p>
         <button type="button" id="close-settings" class="ghost">Done</button>
       </section>
 
@@ -121,10 +126,12 @@
       <div id="resize-handle" class="resize-handle" title="Resize HUD" data-hud-solid data-hud-resize></div>
     </div>
     <script src="./tabs.js"></script>
+    <script src="./context.js"></script>
     <script src="./core.js"></script>
     <script src="./modes.js"></script>
     <script src="./models.js"></script>
     <script src="./markdown.js"></script>
+    <script src="./activity.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

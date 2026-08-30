@@ -4,8 +4,11 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { encodeLine, extractAssistantText } = require("../lib/protocol");
 const { normalizeConfig, validateWorkspace } = require("../lib/config");
-const { flattenModelOptions, optionKey } = require("../lib/models");
+const { flattenModelOptions, optionKey, modelSelection } = require("../lib/models");
 const { resolveModeOptions, normalizeMode } = require("../lib/modes");
+const { toHudDelta, pickDetail, extractPlanMarkdown, planMarkdownFromDelta } = require("../lib/activity");
+const { createTracer } = require("../lib/trace");
+const { attachHistory } = require("../lib/context");
 
 function write(obj) {
   process.stdout.write(encodeLine(obj));
@@ -25,25 +28,24 @@ async function loadSdk() {
   }
 }
 
-function toHudAssistantDelta(update) {
-  if (!update) return null;
-  if (update.type !== "text-delta" || update.text == null || update.text === "") return null;
-  let text = String(update.text);
-  if (text.length > 1 && text.endsWith("\n") && !text.endsWith("\n\n")) {
-    text = text.slice(0, -1);
-  }
-  return { kind: "assistant-delta", text };
-}
-
 class AgentHost {
   constructor() {
     this.sdk = null;
     this.config = normalizeConfig({});
     this.sessions = new Map();
+    this.tracer = createTracer({
+      enabled: this.config.debug,
+      dir: this.config.debugDir || path.join(process.cwd(), "debug"),
+    });
   }
 
   hud(tabId, payload) {
-    write({ event: "hud", tabId, ...payload });
+    const event = { event: "hud", tabId, ...payload };
+    const kind = payload && payload.kind;
+    if (kind !== "assistant-delta" && kind !== "thinking-delta") {
+      this.tracer.append({ source: "host", tabId, kind, ...payload });
+    }
+    write(event);
   }
 
   async init() {
@@ -123,8 +125,18 @@ class AgentHost {
       params: this.config.modelParams,
     });
     const nextMode = normalizeMode(this.config.mode);
-    if (prevModel !== nextModel || prevMode !== nextMode) {
-      for (const session of this.sessions.values()) this.disposeSession(session);
+    if (prevModel !== nextModel) {
+      for (const session of this.sessions.values()) {
+        this.disposeSession(session);
+        session.agentId = "";
+      }
+    }
+    this.tracer.configure({
+      enabled: this.config.debug,
+      dir: this.config.debugDir || path.join(process.cwd(), "debug"),
+    });
+    if (prevMode !== nextMode) {
+      this.tracer.append({ source: "host", kind: "mode", from: prevMode, to: nextMode });
     }
     return this.config;
   }
@@ -134,7 +146,16 @@ class AgentHost {
     if (!id) throw new Error("Missing tab.");
     let session = this.sessions.get(id);
     if (!session) {
-      session = { tabId: id, workspace: "", agent: null, currentRun: null, busy: false };
+      session = {
+        tabId: id,
+        workspace: "",
+        mode: "",
+        agentId: "",
+        agent: null,
+        currentRun: null,
+        busy: false,
+        cancelRequested: false,
+      };
       this.sessions.set(id, session);
     }
     return session;
@@ -150,6 +171,7 @@ class AgentHost {
       session.agent = null;
     }
     session.busy = false;
+    session.cancelRequested = false;
   }
 
   closeTab(tabId) {
@@ -161,69 +183,122 @@ class AgentHost {
     return { closed: true };
   }
 
-  async ensureAgent(tabId, workspace) {
+  rememberAgent(session, tabId, folder) {
+    session.agentId = session.agent && session.agent.agentId ? session.agent.agentId : session.agentId || "";
+    if (session.agentId) {
+      write({ event: "agent", tabId, agentId: session.agentId, workspace: folder });
+    }
+  }
+
+  async ensureAgent(tabId, workspace, requestedMode, extras) {
     const folder = String(workspace || "").trim();
     const workspaceError = validateWorkspace(folder);
     if (workspaceError) throw new Error(workspaceError);
     if (!fs.existsSync(folder)) throw new Error(`Workspace does not exist: ${folder}`);
 
     const session = this.session(tabId);
+    const wantedMode = normalizeMode(requestedMode || this.config.mode);
+    const hintedId = String((extras && extras.agentId) || session.agentId || "").trim();
     if (
       session.agent &&
       session.workspace &&
       path.resolve(session.workspace) === path.resolve(folder)
     ) {
-      return session;
+      session.mode = wantedMode;
+      return { session, fresh: false };
     }
+
     this.disposeSession(session);
     session.workspace = folder;
+    session.mode = wantedMode;
+    session.agentId = hintedId;
     const { Agent } = this.sdk;
-    const model = { id: this.config.model || "composer-2.5" };
-    if (this.config.modelParams && this.config.modelParams.length) {
-      model.params = this.config.modelParams;
+    const cwd = path.resolve(folder);
+
+    const model = modelSelection(this.config);
+    if (hintedId) {
+      try {
+        session.agent = await Agent.resume(hintedId, { model, local: { cwd } });
+        this.rememberAgent(session, tabId, folder);
+        this.tracer.append({ source: "host", kind: "resume", tabId, agentId: hintedId, model: model.id });
+        return { session, fresh: false };
+      } catch (err) {
+        log("resume failed", err.message);
+        this.tracer.append({
+          source: "host",
+          kind: "resume-failed",
+          tabId,
+          agentId: hintedId,
+          message: err.message || String(err),
+        });
+      }
     }
-    const mode = resolveModeOptions(this.config.mode);
-    const createOptions = {
+
+    session.agent = await Agent.create({
       model,
-      mode: mode.sdkMode,
-      local: { cwd: path.resolve(folder) },
-    };
-    if (mode.tools) createOptions.tools = mode.tools;
-    if (mode.disallowedTools) createOptions.disallowedTools = mode.disallowedTools;
-    session.agent = await Agent.create(createOptions);
-    write({ event: "agent", tabId, agentId: session.agent.agentId, workspace: folder });
-    return session;
+      local: { cwd },
+    });
+    this.rememberAgent(session, tabId, folder);
+    this.tracer.append({ source: "host", kind: "create", tabId, agentId: session.agentId });
+    return { session, fresh: true };
   }
 
-  async send({ tabId, text, image, workspace }) {
+  async send({ tabId, text, image, workspace, mode, agentId, messages }) {
     const session = this.session(tabId);
     if (session.busy) throw new Error("This tab is already running a prompt.");
     const prompt = String(text || "").trim();
     if (!prompt) throw new Error("Type a prompt first.");
 
-    await this.ensureAgent(tabId, workspace || session.workspace);
+    const wantedMode = normalizeMode(mode || this.config.mode);
+    this.tracer.append({
+      source: "host",
+      kind: "send",
+      tabId,
+      mode: wantedMode,
+      workspace: workspace || session.workspace,
+      text: prompt,
+    });
+    const { fresh } = await this.ensureAgent(tabId, workspace || session.workspace, wantedMode, {
+      agentId,
+    });
+    const outbound = fresh ? attachHistory(messages, prompt) : prompt;
     session.busy = true;
+    session.cancelRequested = false;
     this.hud(tabId, { kind: "user", text: prompt });
     this.hud(tabId, { kind: "assistant-start" });
 
     const payload = image
-      ? { text: prompt, images: [{ data: image, mimeType: "image/png" }] }
-      : prompt;
+      ? { text: outbound, images: [{ data: image, mimeType: "image/png" }] }
+      : outbound;
 
     try {
       let sawTextDelta = false;
-      const mode = resolveModeOptions(this.config.mode);
-      const run = await session.agent.send(payload, {
-        mode: mode.sdkMode,
+      const modeOptions = resolveModeOptions(wantedMode);
+      const sendOptions = {
+        model: modelSelection(this.config),
+        mode: modeOptions.sdkMode,
         onDelta: ({ update }) => {
-          const hud = toHudAssistantDelta(update);
+          const hud = toHudDelta(update);
           if (hud) {
-            sawTextDelta = true;
+            if (hud.kind === "assistant-delta") sawTextDelta = true;
             this.hud(tabId, hud);
           }
+          const plan = planMarkdownFromDelta(update);
+          if (plan) {
+            sawTextDelta = true;
+            this.hud(tabId, { kind: "assistant-delta", text: plan });
+          }
         },
-      });
+      };
+      if (modeOptions.tools) sendOptions.tools = modeOptions.tools;
+      if (modeOptions.disallowedTools) sendOptions.disallowedTools = modeOptions.disallowedTools;
+      const run = await session.agent.send(payload, sendOptions);
       session.currentRun = run;
+      if (session.cancelRequested) {
+        await run.cancel();
+        this.hud(tabId, { kind: "done", status: "cancelled" });
+        return { status: "cancelled", tabId };
+      }
 
       for await (const event of run.stream()) {
         if (event.type === "tool_call") {
@@ -232,7 +307,13 @@ class AgentHost {
             call_id: event.call_id,
             name: event.name,
             status: event.status,
+            detail: pickDetail(event.args),
           });
+          const plan = extractPlanMarkdown(event.name, event.args);
+          if (plan) {
+            sawTextDelta = true;
+            this.hud(tabId, { kind: "assistant-delta", text: plan });
+          }
         } else if (event.type === "assistant") {
           if (sawTextDelta) continue;
           const chunk = extractAssistantText(event);
@@ -240,7 +321,8 @@ class AgentHost {
         } else if (event.type === "status") {
           this.hud(tabId, { kind: "status", status: String(event.status).toLowerCase() });
         } else if (event.type === "thinking") {
-          this.hud(tabId, { kind: "status", status: "thinking" });
+          if (event.text) this.hud(tabId, { kind: "thinking-delta", text: String(event.text) });
+          else this.hud(tabId, { kind: "status", status: "thinking" });
         }
       }
 
@@ -248,21 +330,28 @@ class AgentHost {
       this.hud(tabId, { kind: "done", result: result.result || "", status: result.status });
       return { status: result.status, tabId };
     } catch (err) {
+      if (session.cancelRequested || /cancel/i.test(err.message || "")) {
+        this.hud(tabId, { kind: "done", status: "cancelled" });
+        return { status: "cancelled", tabId };
+      }
       this.hud(tabId, { kind: "error", message: err.message || String(err) });
       throw err;
     } finally {
       session.busy = false;
       session.currentRun = null;
+      session.cancelRequested = false;
     }
   }
 
   async cancel(tabId) {
     const session = tabId ? this.sessions.get(tabId) : null;
-    if (session && session.currentRun) {
+    if (!session) return { cancelled: false, tabId: tabId || null };
+    session.cancelRequested = true;
+    if (session.currentRun) {
       await session.currentRun.cancel();
       return { cancelled: true, tabId };
     }
-    return { cancelled: false, tabId: tabId || null };
+    return { cancelled: Boolean(session.busy), tabId: tabId || null };
   }
 }
 
@@ -284,6 +373,9 @@ async function main() {
               text: msg.text,
               image: msg.image,
               workspace: msg.workspace,
+              mode: msg.mode,
+              agentId: msg.agentId,
+              messages: msg.messages,
             })
             .then((result) => write({ id, ok: true, result }))
             .catch((err) => write({ id, ok: false, error: err.message || String(err) }));

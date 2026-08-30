@@ -8,7 +8,9 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { createNdjsonParser, encodeLine } = require("../lib/protocol");
 const { normalizeConfig, normalizeBounds } = require("../lib/config");
+const { optionKey } = require("../lib/models");
 const { resolveHostLaunch } = require("../lib/host-process");
+const { createTracer, slimTranscript } = require("../lib/trace");
 
 let hudWindow = null;
 let host = null;
@@ -19,6 +21,7 @@ let hostReady = Promise.resolve();
 let resolveHostReady = () => {};
 let ghosted = false;
 let windowDrag = null;
+let tracer = createTracer({ enabled: true, dir: "" });
 
 function configPath() {
   return path.join(app.getPath("userData"), "config.json");
@@ -33,12 +36,43 @@ function loadConfig() {
   return config;
 }
 
+function tracesDir() {
+  if (process.env.CURSOR_HUD_DEBUG_DIR) return process.env.CURSOR_HUD_DEBUG_DIR;
+  if (app.isPackaged) return path.join(app.getPath("userData"), "debug");
+  return path.join(__dirname, "..", "debug");
+}
+
+function debugOn() {
+  const env = process.env.CURSOR_HUD_DEBUG;
+  if (env === "0" || /^false$/i.test(String(env || ""))) return false;
+  if (env === "1" || /^true$/i.test(String(env || ""))) return true;
+  return Boolean(config.debug);
+}
+
+function configForHost() {
+  return { ...config, debug: debugOn(), debugDir: tracesDir() };
+}
+
+function persistableConfig() {
+  const { debugDir: _debugDir, ...rest } = config;
+  return rest;
+}
+
+function refreshTracer() {
+  tracer.configure({ enabled: debugOn(), dir: tracesDir() });
+}
+
 function saveConfig(next) {
+  const prevModel = optionKey({ id: config.model, params: config.modelParams });
+  const prevDebug = debugOn();
   config = normalizeConfig({ ...config, ...next });
+  refreshTracer();
   fs.mkdirSync(app.getPath("userData"), { recursive: true });
-  fs.writeFileSync(configPath(), JSON.stringify(config, null, 2));
-  if (host && host.child.stdin.writable) {
-    sendToHost({ op: "configure", config });
+  fs.writeFileSync(configPath(), JSON.stringify(persistableConfig(), null, 2));
+  const modelChanged = prevModel !== optionKey({ id: config.model, params: config.modelParams });
+  const debugChanged = prevDebug !== debugOn();
+  if (host && host.child.stdin.writable && (modelChanged || debugChanged)) {
+    sendToHost({ op: "configure", config: configForHost() });
   }
   return config;
 }
@@ -166,7 +200,13 @@ function startHost() {
     });
   });
   host = { child };
-  hostReady.then(() => sendToHost({ op: "configure", config: loadConfig() })).catch(() => {});
+  hostReady
+    .then(() => {
+      loadConfig();
+      refreshTracer();
+      sendToHost({ op: "configure", config: configForHost() });
+    })
+    .catch(() => {});
 }
 
 function createHudWindow() {
@@ -258,6 +298,18 @@ function registerIpc() {
   });
 
   ipcMain.handle("hud:save-config", (_event, next) => saveConfig(next));
+  ipcMain.handle("hud:trace", (_event, payload) => {
+    refreshTracer();
+    if (!payload || typeof payload !== "object") return null;
+    if (payload.op === "snapshot") {
+      return tracer.snapshot({
+        mode: payload.mode || config.mode,
+        ghosted: Boolean(payload.ghosted),
+        ...slimTranscript(payload.tab, payload.extras),
+      });
+    }
+    return tracer.append({ source: "renderer", ...payload });
+  });
 
   ipcMain.handle("hud:pick-workspace", async () => {
     const result = await dialog.showOpenDialog(hudWindow, {
@@ -291,6 +343,9 @@ function registerIpc() {
       workspace: payload && payload.workspace,
       text,
       image,
+      mode: payload && payload.mode,
+      agentId: payload && payload.agentId,
+      messages: payload && payload.messages,
     });
   });
 
@@ -363,6 +418,7 @@ function registerHotkeys() {
 
 app.whenReady().then(() => {
   loadConfig();
+  refreshTracer();
   startHost();
   registerIpc();
   createHudWindow();

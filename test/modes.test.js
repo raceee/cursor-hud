@@ -22,9 +22,15 @@ describe("conversation modes", () => {
 
   it("maps ask to read-only tool restrictions", () => {
     const options = resolveModeOptions("ask");
-    assert.equal(options.sdkMode, "ask");
+    assert.equal(options.sdkMode, "agent");
     assert.ok(options.disallowedTools.includes("shell"));
     assert.ok(options.disallowedTools.includes("edit"));
+  });
+
+  it("sends only SDK-supported modes", () => {
+    assert.equal(resolveModeOptions("plan").sdkMode, "plan");
+    assert.equal(resolveModeOptions("debug").sdkMode, "agent");
+    assert.equal(resolveModeOptions("agent").sdkMode, "agent");
   });
 
   it("persists mode in config defaults", () => {

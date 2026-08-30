@@ -6,6 +6,7 @@
       messages: [],
       status: "idle",
       tools: [],
+      thinking: "",
       error: null,
     };
   }
@@ -83,6 +84,7 @@
         next.status = "running";
         next.error = null;
         next.tools = [];
+        next.thinking = "";
         break;
       }
       case "assistant-start": {
@@ -108,13 +110,19 @@
         next.status = "running";
         break;
       }
+      case "thinking-delta": {
+        next.thinking = mergeAssistantText(next.thinking, event.text);
+        if (next.status === "idle") next.status = "thinking";
+        break;
+      }
       case "tool": {
         const callId = event.call_id || event.name || `tool-${next.tools.length + 1}`;
         const existing = next.tools.find((tool) => tool.call_id === callId);
         const entry = {
           call_id: callId,
-          name: event.name || "tool",
+          name: event.name || (existing && existing.name) || "tool",
           status: event.status || "running",
+          detail: event.detail || (existing && existing.detail) || "",
         };
         if (existing) Object.assign(existing, entry);
         else next.tools.push(entry);
@@ -128,6 +136,7 @@
       case "error": {
         next.status = "error";
         next.error = String(event.message || "Request failed");
+        next.thinking = "";
         const assistant = lastOfRole(next.messages, "assistant");
         if (assistant) assistant.pending = false;
         break;
@@ -146,6 +155,7 @@
           });
         }
         next.status = event.status === "cancelled" ? "cancelled" : "idle";
+        next.thinking = "";
         next.tools = next.tools.map((tool) =>
           tool.status === "running" ? { ...tool, status: "completed" } : tool
         );

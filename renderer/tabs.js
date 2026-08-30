@@ -43,12 +43,25 @@
     return count === 0 ? name : `${name} ${count + 1}`;
   }
 
+  function slimTabMessages(messages) {
+    if (!Array.isArray(messages)) return [];
+    return messages
+      .filter((item) => item && (item.role === "user" || item.role === "assistant") && String(item.text || "").trim())
+      .slice(-12)
+      .map((item) => ({
+        role: item.role,
+        text: String(item.text).trim().slice(0, 2000),
+      }));
+  }
+
   function createTab(workspace, tabs, id) {
     const folder = String(workspace || "").trim().replace(/[\\/]+$/, "");
     return {
       id: id || makeTabId(),
       workspace: folder,
       title: nextTabTitle(folder, tabs || []),
+      agentId: "",
+      messages: [],
     };
   }
 
@@ -64,7 +77,14 @@
         typeof item.title === "string" && item.title.trim()
           ? item.title.trim()
           : nextTabTitle(workspace, tabs);
-      tabs.push({ id, workspace, title });
+      const agentId = typeof item.agentId === "string" ? item.agentId.trim() : "";
+      tabs.push({
+        id,
+        workspace,
+        title,
+        agentId,
+        messages: slimTabMessages(item.messages),
+      });
     }
     return tabs;
   }

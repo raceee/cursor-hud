@@ -7,4 +7,7 @@ out/
 .env.*
 !.env.example
 agent-tools/
+debug/*.json
+debug/*.jsonl
+debug/*.prev
 *.zip

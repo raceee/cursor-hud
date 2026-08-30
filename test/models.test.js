@@ -2,7 +2,7 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
-const { flattenModelOptions, optionKey, findModelOption } = require("../lib/models");
+const { flattenModelOptions, optionKey, findModelOption, modelSelection } = require("../lib/models");
 
 describe("model catalog", () => {
   it("flattens variants into Cursor-style selector rows", () => {
@@ -38,5 +38,14 @@ describe("model catalog", () => {
     const found = findModelOption(options, "composer-2.5", [{ id: "fast", value: "false" }]);
     assert.equal(found.label, "Composer 2.5");
     assert.equal(findModelOption(options, "missing", []).id, "composer-2.5");
+  });
+
+  it("always produces an explicit model for local SDK calls", () => {
+    assert.deepEqual(modelSelection({}), { id: "composer-2.5" });
+    assert.deepEqual(modelSelection({ model: "composer-2" }), { id: "composer-2" });
+    assert.deepEqual(modelSelection({ model: "composer-2.5", modelParams: [{ id: "fast", value: "true" }] }), {
+      id: "composer-2.5",
+      params: [{ id: "fast", value: "true" }],
+    });
   });
 });

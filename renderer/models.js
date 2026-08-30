@@ -59,6 +59,18 @@
     return optionKey({ id: "x", params: a }) === optionKey({ id: "x", params: b });
   }
 
+  function modelSelection(config) {
+    const id =
+      config && typeof config.model === "string" && config.model.trim()
+        ? config.model.trim()
+        : "composer-2.5";
+    const model = { id };
+    if (config && Array.isArray(config.modelParams) && config.modelParams.length) {
+      model.params = config.modelParams;
+    }
+    return model;
+  }
+
   function findModelOption(options, modelId, params) {
     const list = Array.isArray(options) ? options : [];
     const wanted = optionKey({ id: modelId, params });
@@ -71,7 +83,7 @@
     );
   }
 
-  const api = { flattenModelOptions, optionKey, findModelOption };
+  const api = { flattenModelOptions, optionKey, findModelOption, modelSelection };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   root.HudModels = api;
 })(typeof window !== "undefined" ? window : globalThis);

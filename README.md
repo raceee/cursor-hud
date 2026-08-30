@@ -19,6 +19,15 @@ Linux: `npm run start:linux`
 
 Sign in from Setup, or set `CURSOR_API_KEY`. Hotkey: `Ctrl+Shift+H` (`Cmd+Shift+H` on Mac).
 
+## Local debug traces
+
+On by default (Setup → Local debug traces). While the HUD is running from this repo, another assistant can read:
+
+- `debug/latest.json` — what the HUD is showing right now (mode, workspace, last messages, tools)
+- `debug/hud-trace.jsonl` — event log (sends, tools, errors)
+
+API keys and tokens are redacted. Turn it off in Setup, or set `CURSOR_HUD_DEBUG=0`. Packaged builds write to the app data `debug` folder instead.
+
 ## Development
 
 ```bash

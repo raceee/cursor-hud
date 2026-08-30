@@ -21,7 +21,7 @@
       label: "Ask",
       description: "Explore code without making changes",
       placeholder: "Ask about this codebase…",
-      sdkMode: "ask",
+      sdkMode: "agent",
       disallowedTools: ["shell", "edit", "delete", "task", "applyAgentDiff", "generateImage"],
     },
     {
@@ -29,7 +29,7 @@
       label: "Debug",
       description: "Diagnose and fix issues",
       placeholder: "Describe a bug or unexpected behavior…",
-      sdkMode: "debug",
+      sdkMode: "agent",
     },
   ];
 
@@ -48,7 +48,7 @@
 
   function resolveModeOptions(id) {
     const mode = getMode(id);
-    const options = { sdkMode: mode.sdkMode };
+    const options = { sdkMode: mode.sdkMode === "plan" ? "plan" : "agent" };
     if (Array.isArray(mode.tools) && mode.tools.length) options.tools = mode.tools.slice();
     if (Array.isArray(mode.disallowedTools) && mode.disallowedTools.length) {
       options.disallowedTools = mode.disallowedTools.slice();

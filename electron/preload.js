@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("cursorHud", {
   openUrl: (url) => ipcRenderer.invoke("hud:open-url", url),
   pickWorkspace: () => ipcRenderer.invoke("hud:pick-workspace"),
   saveConfig: (config) => ipcRenderer.invoke("hud:save-config", config),
+  writeTrace: (payload) => ipcRenderer.invoke("hud:trace", payload),
   setIgnoreMouse: (ignore) => ipcRenderer.send("hud:ignore-mouse", ignore),
   setCompact: (compact) => ipcRenderer.send("hud:compact", compact),
   windowDragStart: (kind) => ipcRenderer.send("hud:drag-start", kind),

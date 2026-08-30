@@ -40,10 +40,15 @@ body {
   padding: 8px;
   gap: 8px;
   -webkit-app-region: no-drag;
+  background: rgba(18, 18, 18, 0.52);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
 }
 
 html.is-ghost .shell {
   opacity: 0.46;
+  background: transparent;
+  border-color: transparent;
 }
 
 .tabs {
@@ -182,6 +187,40 @@ html.is-ghost .shell {
   color: var(--text);
   padding: 2px 4px;
   white-space: normal;
+}
+
+.msg.is-plan {
+  padding: 8px 10px 10px;
+  border: 1px solid var(--composer-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.plan-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--composer-border);
+}
+
+.plan-build {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 14px;
+  background: var(--send);
+  color: var(--send-fg);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.plan-build:hover {
+  filter: brightness(1.08);
 }
 
 .md-prose {
@@ -398,10 +437,56 @@ html.is-ghost .shell {
   color: #dcdcaa;
 }
 
-.msg.pending::after {
+.msg.pending.is-empty {
+  min-height: 0;
+  padding: 0;
+}
+
+.msg.pending:not(.is-empty)::after {
   content: "▍";
   color: var(--muted);
   animation: blink 1s steps(1) infinite;
+}
+
+.activity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 2px 4px 6px;
+}
+
+.activity-row {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.activity-row.is-live,
+.activity-row.is-think {
+  color: #c4c4c4;
+}
+
+.activity-row.is-live::before,
+.activity-row.is-think::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 7px;
+  margin-bottom: 1px;
+  border-radius: 999px;
+  background: #a3a3a3;
+  animation: blink 1s steps(1) infinite;
+}
+
+.activity-row.is-done::before {
+  content: "✓";
+  margin-right: 6px;
+  color: var(--faint);
+}
+
+.activity-row.is-error {
+  color: var(--error);
 }
 
 .msg.error {
@@ -416,6 +501,9 @@ html.is-ghost .shell {
   bottom: 6px;
   font-size: 11px;
   color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .composer {
@@ -470,6 +558,7 @@ textarea::placeholder {
 .chip,
 .icon-btn,
 .send,
+.stop,
 .text-btn,
 .tab,
 .tab-close,
@@ -606,6 +695,15 @@ textarea::placeholder {
   cursor: default;
 }
 
+.send.stop {
+  background: #ececec;
+}
+
+.send.stop svg {
+  fill: currentColor;
+  stroke: none;
+}
+
 .menu.mode-menu {
   left: 18px;
   right: auto;
@@ -732,6 +830,16 @@ label {
   gap: 6px;
   font-size: 12px;
   color: var(--muted);
+}
+
+label.toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+label.toggle input {
+  margin: 0;
 }
 
 input[type="text"] {

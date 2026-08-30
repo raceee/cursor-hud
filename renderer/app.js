@@ -5,6 +5,8 @@ const tabLib = window.HudTabs;
 const modesLib = window.HudModes;
 const modelsLib = window.HudModels;
 const markdown = window.HudMarkdown;
+const activity = window.HudActivity;
+const contextLib = window.HudContext;
 const hud = window.cursorHud;
 
 const els = {
@@ -31,6 +33,7 @@ const els = {
   modelMenu: document.getElementById("model-menu"),
   modelList: document.getElementById("model-list"),
   attachScreen: document.getElementById("attach-screen"),
+  debugTraces: document.getElementById("debug-traces"),
   loginUrl: document.getElementById("login-url"),
   tabList: document.getElementById("tab-list"),
   sameRepo: document.getElementById("same-repo"),
@@ -45,6 +48,7 @@ let config = {
   modelParams: [],
   attachScreen: false,
   compact: false,
+  debug: true,
 };
 let tabs = [];
 let activeTabId = "";
@@ -54,20 +58,50 @@ let loginUrl = "";
 let authState = { status: "logged-out" };
 let ghosted = false;
 let dragging = false;
+let booted = false;
 
 function activeTab() {
   return tabs.find((tab) => tab.id === activeTabId) || null;
 }
 
 function persist() {
+  if (!booted) return;
   const current = activeTab();
   hud.saveConfig({
     ...config,
-    tabs: tabs.map((tab) => ({ id: tab.id, workspace: tab.workspace, title: tab.title })),
+    tabs: tabs.map((tab) => ({
+      id: tab.id,
+      workspace: tab.workspace,
+      title: tab.title,
+      agentId: tab.agentId || "",
+      messages: contextLib.slimMessages(tab.transcript && tab.transcript.messages),
+    })),
     activeTabId,
     recentWorkspaces,
     workspace: current ? current.workspace : "",
   });
+  writeSnapshot(true);
+}
+
+let snapshotTimer = 0;
+function writeSnapshot(force) {
+  if (!hud.writeTrace || config.debug === false) return;
+  const send = () => {
+    const tab = activeTab();
+    hud.writeTrace({
+      op: "snapshot",
+      mode: config.mode,
+      ghosted,
+      tab,
+    }).catch(() => {});
+  };
+  if (force) {
+    clearTimeout(snapshotTimer);
+    send();
+    return;
+  }
+  clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(send, 120);
 }
 
 function selectedMode() {
@@ -156,7 +190,55 @@ function renderModelMenu() {
 }
 
 function renderModelChip() {
-  els.modelLabel.textContent = selectedModel().label || config.model || "Model";
+  const label = selectedModel().label || config.model || "Model";
+  els.modelLabel.textContent = label;
+  document.querySelectorAll("[data-model-label]").forEach((node) => {
+    node.textContent = label;
+  });
+}
+
+function openModelMenu() {
+  const open = els.modelMenu.hidden;
+  els.modeMenu.hidden = true;
+  els.modelMenu.hidden = !open;
+  if (open) {
+    renderModelMenu();
+    hud.setIgnoreMouse(false);
+  }
+}
+
+const CHIP_CHEVRON =
+  '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M3 4.5 6 8l3-3.5" /></svg>';
+
+function renderPlanActions(parent) {
+  const bar = document.createElement("div");
+  bar.className = "plan-actions";
+
+  const modelBtn = document.createElement("button");
+  modelBtn.type = "button";
+  modelBtn.className = "chip";
+  modelBtn.title = "Model for this build";
+  const modelLabel = document.createElement("span");
+  modelLabel.dataset.modelLabel = "1";
+  modelLabel.textContent = selectedModel().label || config.model || "Model";
+  modelBtn.appendChild(modelLabel);
+  modelBtn.insertAdjacentHTML("beforeend", CHIP_CHEVRON);
+  modelBtn.addEventListener("click", (event) => {
+    event.preventDefault();
+    openModelMenu();
+  });
+
+  const build = document.createElement("button");
+  build.type = "button";
+  build.className = "plan-build";
+  build.textContent = "Build";
+  build.addEventListener("click", (event) => {
+    event.preventDefault();
+    buildPlan();
+  });
+
+  bar.append(modelBtn, build);
+  parent.appendChild(bar);
 }
 
 function renderTabs() {
@@ -183,6 +265,36 @@ function renderTabs() {
   }
 }
 
+function renderActivity(parent, state) {
+  const tools = state.tools || [];
+  const busy = state.status === "running" || state.status === "thinking";
+  const thought = activity.lastThinkingLine(state.thinking);
+  const hasAssistantText = (state.messages || []).some((msg) => msg.role === "assistant" && msg.text);
+  if (!tools.length && !thought && !(busy && !hasAssistantText)) return;
+
+  const box = document.createElement("div");
+  box.className = "activity";
+  if (thought && busy) {
+    const row = document.createElement("div");
+    row.className = "activity-row is-think";
+    row.textContent = thought;
+    box.appendChild(row);
+  } else if (busy && !tools.some((tool) => tool.status === "running") && !hasAssistantText) {
+    const row = document.createElement("div");
+    row.className = "activity-row is-live";
+    row.textContent = "Thinking…";
+    box.appendChild(row);
+  }
+  for (const tool of tools) {
+    const row = document.createElement("div");
+    const status = activity.normalizeToolStatus(tool.status);
+    row.className = `activity-row${status === "running" ? " is-live" : status === "error" ? " is-error" : " is-done"}`;
+    row.textContent = activity.formatToolLine(tool);
+    box.appendChild(row);
+  }
+  parent.appendChild(box);
+}
+
 function renderThread() {
   const tab = activeTab();
   const state = tab ? tab.transcript : core.createTranscript();
@@ -199,7 +311,9 @@ function renderThread() {
     els.messages.appendChild(empty);
   }
   if (tab) {
-    for (const msg of state.messages) {
+    const lastAssistant = state.messages.reduce((found, msg, index) => (msg.role === "assistant" ? index : found), -1);
+    state.messages.forEach((msg, index) => {
+      if (index === lastAssistant) renderActivity(els.messages, state);
       const node = document.createElement("div");
       node.className = `msg ${msg.role}${msg.pending ? " pending" : ""}`;
       const raw = msg.role === "assistant" ? core.formatAssistantText(msg.text) : msg.text || "";
@@ -208,8 +322,18 @@ function renderThread() {
       } else {
         node.textContent = raw || (msg.pending ? "" : "");
       }
+      if (msg.role === "assistant" && !raw && msg.pending) node.classList.add("is-empty");
+      if (
+        index === lastAssistant &&
+        !msg.pending &&
+        activity.hasReadyPlan(state, config.mode)
+      ) {
+        node.classList.add("is-plan");
+        renderPlanActions(node);
+      }
       els.messages.appendChild(node);
-    }
+    });
+    if (lastAssistant === -1) renderActivity(els.messages, state);
     if (state.error) {
       const node = document.createElement("div");
       node.className = "msg error";
@@ -218,10 +342,23 @@ function renderThread() {
     }
   }
   els.messages.scrollTop = els.messages.scrollHeight;
-  const liveTools = (state.tools || []).filter((tool) => tool.status === "running");
-  els.tools.hidden = liveTools.length === 0;
-  els.tools.textContent = liveTools.map((tool) => tool.name).join(" · ");
-  els.send.disabled = !tab || state.status === "running" || state.status === "thinking";
+  const liveTools = (state.tools || []).filter((tool) => activity.normalizeToolStatus(tool.status) === "running");
+  const thought = activity.lastThinkingLine(state.thinking);
+  const busy = state.status === "running" || state.status === "thinking";
+  if (liveTools.length) {
+    els.tools.hidden = false;
+    els.tools.textContent = liveTools.map((tool) => activity.formatToolLine(tool)).join(" · ");
+  } else if (busy && thought) {
+    els.tools.hidden = false;
+    els.tools.textContent = thought;
+  } else if (busy) {
+    els.tools.hidden = false;
+    els.tools.textContent = "Thinking…";
+  } else {
+    els.tools.hidden = true;
+    els.tools.textContent = "";
+  }
+  setSendButton(Boolean(tab && busy), !tab);
   els.workspace.value = tab ? tab.workspace : "";
 }
 
@@ -274,6 +411,7 @@ function applyConfig(next) {
   config.mode = modesLib.normalizeMode(config.mode);
   if (!Array.isArray(config.modelParams)) config.modelParams = [];
   els.attachScreen.checked = Boolean(config.attachScreen);
+  if (els.debugTraces) els.debugTraces.checked = config.debug !== false;
   els.shell.classList.toggle("is-compact", Boolean(config.compact));
   document.getElementById("toggle-compact").textContent = config.compact ? "Show" : "Hide";
   renderModeChip();
@@ -438,18 +576,64 @@ els.messages.addEventListener("click", (event) => {
   hud.openUrl(link.href);
 });
 
-els.form.addEventListener("submit", async (event) => {
-  event.preventDefault();
+const SEND_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.5V3.6M4.2 7.2 8 3.5l3.8 3.7" /></svg>';
+const STOP_ICON =
+  '<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="4.5" width="7" height="7" rx="1.2" /></svg>';
+
+function setSendButton(stopping, disabled) {
+  els.send.classList.toggle("stop", stopping);
+  els.send.type = stopping ? "button" : "submit";
+  els.send.title = stopping ? "Stop" : "Send";
+  els.send.setAttribute("aria-label", stopping ? "Stop" : "Send");
+  els.send.disabled = Boolean(disabled);
+  const kind = stopping ? "stop" : "send";
+  if (els.send.dataset.kind !== kind) {
+    els.send.dataset.kind = kind;
+    els.send.innerHTML = stopping ? STOP_ICON : SEND_ICON;
+  }
+}
+
+async function stopRun() {
   const tab = activeTab();
-  const text = els.prompt.value.trim();
-  if (!tab || !text || els.send.disabled) return;
-  els.prompt.value = "";
+  if (!tab) return;
+  els.send.disabled = true;
+  try {
+    await hud.cancel(tab.id);
+  } catch (err) {
+    tab.transcript = core.applyHudEvent(tab.transcript, {
+      kind: "error",
+      message: err.message || String(err),
+    });
+    renderThread();
+  }
+}
+
+els.send.addEventListener("click", (event) => {
+  if (!els.send.classList.contains("stop")) return;
+  event.preventDefault();
+  stopRun();
+});
+
+async function sendToAgent(text, options) {
+  const tab = activeTab();
+  const prompt = String(text || "").trim();
+  if (!tab || !prompt || els.send.disabled) return;
+  const mode = modesLib.normalizeMode((options && options.mode) || config.mode);
+  if (options && options.mode) {
+    config.mode = mode;
+    renderModeChip();
+    persist();
+  }
   try {
     await hud.sendPrompt({
       tabId: tab.id,
       workspace: tab.workspace,
-      text,
+      text: prompt,
       attachScreen: els.attachScreen.checked,
+      mode,
+      agentId: tab.agentId || "",
+      messages: contextLib.slimMessages(tab.transcript && tab.transcript.messages),
     });
   } catch (err) {
     tab.transcript = core.applyHudEvent(tab.transcript, {
@@ -458,6 +642,18 @@ els.form.addEventListener("submit", async (event) => {
     });
     renderThread();
   }
+}
+
+async function buildPlan() {
+  await sendToAgent("Build this plan.", { mode: "agent" });
+}
+
+els.form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const text = els.prompt.value.trim();
+  if (!text || els.send.disabled) return;
+  els.prompt.value = "";
+  await sendToAgent(text);
 });
 
 els.prompt.addEventListener("pointerdown", () => {
@@ -482,10 +678,17 @@ els.prompt.addEventListener("keydown", (event) => {
     els.form.requestSubmit();
   }
   if (event.key === "Escape") {
+    const tab = activeTab();
+    const running = tab && (tab.transcript.status === "running" || tab.transcript.status === "thinking");
     els.picker.hidden = true;
     els.settings.hidden = true;
     els.modelMenu.hidden = true;
     els.modeMenu.hidden = true;
+    if (running) {
+      event.preventDefault();
+      stopRun();
+      return;
+    }
     els.prompt.blur();
     hud.setIgnoreMouse(true);
   }
@@ -526,13 +729,7 @@ document.getElementById("logout").addEventListener("click", async () => {
   setAuth({ status: "logged-out" });
 });
 els.modelChip.addEventListener("click", () => {
-  const open = els.modelMenu.hidden;
-  els.modeMenu.hidden = true;
-  els.modelMenu.hidden = !open;
-  if (open) {
-    renderModelMenu();
-    hud.setIgnoreMouse(false);
-  }
+  openModelMenu();
 });
 els.modeChip.addEventListener("click", () => {
   const open = els.modeMenu.hidden;
@@ -547,6 +744,12 @@ els.attachScreen.addEventListener("change", () => {
   config.attachScreen = els.attachScreen.checked;
   persist();
 });
+if (els.debugTraces) {
+  els.debugTraces.addEventListener("change", () => {
+    config.debug = els.debugTraces.checked;
+    persist();
+  });
+}
 
 window.addEventListener("mousemove", (event) => {
   syncClickThrough(event.clientX, event.clientY);
@@ -589,12 +792,22 @@ hud.onHudEvent((msg) => {
     persist();
     return;
   }
+  if (msg.event === "agent") {
+    const tab = tabs.find((item) => item.id === msg.tabId) || activeTab();
+    if (tab && msg.agentId) {
+      tab.agentId = msg.agentId;
+      persist();
+    }
+    return;
+  }
   if (msg.event === "hud") {
     const tab = tabs.find((item) => item.id === msg.tabId) || activeTab();
     if (!tab) return;
     tab.transcript = core.applyHudEvent(tab.transcript, msg);
     if (tab.id === activeTabId) renderThread();
     else renderTabs();
+    writeSnapshot(msg.kind === "done" || msg.kind === "error" || msg.kind === "user");
+    if (msg.kind === "done" || msg.kind === "error" || msg.kind === "user") persist();
   }
 });
 
@@ -604,11 +817,14 @@ hud.ready().then((info) => {
   recentWorkspaces = Array.isArray(loaded.recentWorkspaces) ? loaded.recentWorkspaces.slice() : [];
   tabs = (loaded.tabs || []).map((tab) => ({
     ...tab,
-    transcript: core.createTranscript(),
+    agentId: tab.agentId || "",
+    transcript: contextLib.restoreTranscript(core.createTranscript, tab.messages),
   }));
   activeTabId = loaded.activeTabId || (tabs[0] && tabs[0].id) || "";
   setAuth(info.auth);
   applyModels(info.models);
+  booted = true;
+  persist();
   render();
   if (!tabs.length) openPicker();
 });
