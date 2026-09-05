@@ -694,6 +694,14 @@ els.prompt.addEventListener("keydown", (event) => {
   }
 });
 
+function quitHud() {
+  if (!hud.quit) return;
+  hud.quit();
+}
+
+document.getElementById("quit-hud").addEventListener("click", quitHud);
+document.getElementById("quit-hud-setup").addEventListener("click", quitHud);
+
 document.getElementById("open-settings").addEventListener("click", () => {
   els.settings.hidden = false;
   hud.setIgnoreMouse(false);

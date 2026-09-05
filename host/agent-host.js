@@ -174,6 +174,12 @@ class AgentHost {
     session.cancelRequested = false;
   }
 
+  shutdown() {
+    for (const session of this.sessions.values()) this.disposeSession(session);
+    this.sessions.clear();
+    return { shutdown: true };
+  }
+
   closeTab(tabId) {
     const session = this.sessions.get(tabId);
     if (session) {
@@ -389,8 +395,12 @@ async function main() {
         else if (op === "configure") result = host.configure(msg.config || {});
         else if (op === "cancel") result = await host.cancel(msg.tabId);
         else if (op === "close-tab") result = host.closeTab(msg.tabId);
+        else if (op === "shutdown") result = host.shutdown();
         else throw new Error(`Unknown op: ${op}`);
         write({ id, ok: true, result });
+        if (op === "shutdown") {
+          queue.then(() => process.exit(0));
+        }
       } catch (err) {
         write({ id, ok: false, error: err.message || String(err) });
       }

@@ -135,8 +135,13 @@ html.is-ghost .shell {
   padding: 0 1px;
 }
 
-.tab-new {
+.tab-new,
+.tab-quit {
   -webkit-app-region: no-drag;
+}
+
+.tab-quit:hover {
+  color: #fca5a5;
 }
 
 .thread {

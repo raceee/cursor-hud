@@ -19,6 +19,9 @@
         <button type="button" class="icon-btn tab-new" id="new-tab" title="New agent">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" /></svg>
         </button>
+        <button type="button" class="icon-btn tab-quit" id="quit-hud" title="Close HUD">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+        </button>
       </div>
 
       <div class="thread" id="thread" data-hud-solid>
@@ -102,8 +105,14 @@
         </div>
         <p id="login-url" class="hint" hidden></p>
         <p class="hotkey">
-          Ghost overlay (stays put, click-through): <kbd>⌘</kbd><kbd>Shift</kbd><kbd>H</kbd>
+          Ghost overlay (stays put, click-through): <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>H</kbd>
         </p>
+        <p class="hotkey">
+          Close HUD: the × on the tab bar, Setup → Quit, or <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Q</kbd>
+        </p>
+        <div class="row">
+          <button type="button" class="ghost" id="quit-hud-setup">Quit HUD</button>
+        </div>
         <label class="toggle">
           <input type="checkbox" id="debug-traces" checked />
           Local debug traces

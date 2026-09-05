@@ -161,6 +161,37 @@ function focusHudForTyping() {
   hudWindow.webContents.focus();
 }
 
+function killHostTree() {
+  if (!host || !host.child) return;
+  const child = host.child;
+  const pid = child.pid;
+  host = null;
+  if (process.platform === "win32" && pid) {
+    spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    return;
+  }
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    /* already gone */
+  }
+}
+
+function quitHud() {
+  persistBounds();
+  const child = host && host.child;
+  if (child && child.stdin && child.stdin.writable) {
+    sendToHost({ op: "shutdown" }).catch(() => {});
+  }
+  setTimeout(() => {
+    killHostTree();
+    app.quit();
+  }, 250);
+}
+
 function startHost() {
   hostReady = new Promise((resolve) => {
     resolveHostReady = resolve;
@@ -331,6 +362,9 @@ function registerIpc() {
   });
   ipcMain.handle("hud:cancel", (_event, tabId) => sendToHost({ op: "cancel", tabId }));
   ipcMain.handle("hud:close-tab", (_event, tabId) => sendToHost({ op: "close-tab", tabId }));
+  ipcMain.handle("hud:quit", () => {
+    quitHud();
+  });
 
   ipcMain.handle("hud:send", async (_event, payload) => {
     const text = payload && payload.text;
@@ -414,6 +448,9 @@ function registerHotkeys() {
     }
     setGhost(true);
   });
+  globalShortcut.register("CommandOrControl+Shift+Q", () => {
+    quitHud();
+  });
 }
 
 app.whenReady().then(() => {
@@ -438,7 +475,7 @@ app.on("web-contents-created", (_event, contents) => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
-  if (host) host.child.kill();
+  killHostTree();
 });
 
 app.on("window-all-closed", () => {

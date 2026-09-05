@@ -17,7 +17,7 @@ npm start
 
 Linux: `npm run start:linux`
 
-Sign in from Setup, or set `CURSOR_API_KEY`. Hotkey: `Ctrl+Shift+H` (`Cmd+Shift+H` on Mac).
+Sign in from Setup, or set `CURSOR_API_KEY`. Ghost: `Ctrl+Shift+H` (`Cmd+Shift+H` on Mac). Close: the × on the tab bar, Setup → Quit, or `Ctrl+Shift+Q`.
 
 ## Local debug traces
 

@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("cursorHud", {
   sendPrompt: (payload) => ipcRenderer.invoke("hud:send", payload),
   cancel: (tabId) => ipcRenderer.invoke("hud:cancel", tabId),
   closeTab: (tabId) => ipcRenderer.invoke("hud:close-tab", tabId),
+  quit: () => ipcRenderer.invoke("hud:quit"),
   login: () => ipcRenderer.invoke("hud:login"),
   logout: () => ipcRenderer.invoke("hud:logout"),
   listModels: () => ipcRenderer.invoke("hud:models"),
